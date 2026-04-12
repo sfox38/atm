@@ -157,17 +157,25 @@ async def async_remove_token_sensors(
     """Remove sensor entities for a revoked/archived token and clean up the entity registry.
 
     Removing from the entity registry prevents 'unavailable' ghost entries after
-    the token is gone.
+    the token is gone. The associated device is also removed from the device registry.
     """
+    from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
     data: ATMData = hass.data[DOMAIN]
     sensors = data.platform_entities.pop(token_slug, [])
-    registry = er.async_get(hass)
+    entity_reg = er.async_get(hass)
+    device_reg = dr.async_get(hass)
+    device_id = None
     for sensor in sensors:
         await sensor.async_remove()
         if sensor.unique_id:
-            entry = registry.async_get_entity_id(
+            entity_id = entity_reg.async_get_entity_id(
                 "sensor", DOMAIN, sensor.unique_id
             )
-            if entry:
-                registry.async_remove(entry)
+            if entity_id:
+                entry = entity_reg.async_get(entity_id)
+                if entry and device_id is None:
+                    device_id = entry.device_id
+                entity_reg.async_remove(entity_id)
+    if device_id:
+        device_reg.async_remove_device(device_id)
