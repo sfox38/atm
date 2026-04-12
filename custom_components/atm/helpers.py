@@ -9,6 +9,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import MAX_REQUEST_BODY_BYTES, TOKEN_LENGTH, TOKEN_PREFIX
@@ -209,6 +211,37 @@ async def get_authenticated_token(
     return token, rl_result
 
 
+def cancel_expiry_timer(data: ATMData, token_id: str) -> None:
+    """Cancel and remove the pending expiry timer for a token, if one exists."""
+    cancel = data.expiry_timers.pop(token_id, None)
+    if cancel is not None:
+        cancel()
+
+
+def schedule_expiry_timer(hass: HomeAssistant, data: ATMData, token: TokenRecord) -> None:
+    """Schedule a timer to archive a token at its expiry time.
+
+    If the token has no expiry, or has already expired, no timer is scheduled.
+    Any previously registered timer for this token is cancelled first.
+    """
+    if token.expires_at is None:
+        return
+    cancel_expiry_timer(data, token.id)
+    delay = (token.expires_at - utcnow()).total_seconds()
+    if delay <= 0:
+        return
+
+    @callback
+    def _on_expiry(_now=None) -> None:
+        data.expiry_timers.pop(token.id, None)
+        hass.async_create_background_task(
+            archive_expired_token(hass, data, token),
+            f"atm_expire_{token.id}",
+        )
+
+    data.expiry_timers[token.id] = async_call_later(hass, delay, _on_expiry)
+
+
 async def archive_expired_token(
     hass: HomeAssistant,
     data: ATMData,
@@ -222,6 +255,7 @@ async def archive_expired_token(
     """
     now = utcnow()
     slug = token_name_slug(token.name)
+    cancel_expiry_timer(data, token.id)
     await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
     await terminate_token_connections(token.id, data.sse_connections)
     data.rate_limiter.destroy(token.id)

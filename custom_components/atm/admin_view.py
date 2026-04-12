@@ -405,6 +405,8 @@ class ATMAdminTokenView(HomeAssistantView):
         data.rate_limiter.destroy(token_id)
         data.rate_limit_notified.pop(token_id, None)
         data.token_counters.pop(token_id, None)
+        from .helpers import cancel_expiry_timer
+        cancel_expiry_timer(data, token_id)
 
         hass.bus.async_fire("atm_token_revoked", {
             "token_id": token_id,
@@ -819,6 +821,9 @@ class ATMAdminWipeView(HomeAssistantView):
         await data.audit.async_wipe()
 
         active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
+        from .helpers import cancel_expiry_timer
+        for _tid in list(data.expiry_timers):
+            cancel_expiry_timer(data, _tid)
         await data.store.async_wipe()
 
         if data.async_on_token_archived:

@@ -15,7 +15,7 @@ from homeassistant.helpers.storage import Store
 from .audit import AuditLog
 from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL
 from .data import ATMData
-from .helpers import archive_expired_token, terminate_token_connections
+from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
 
@@ -72,6 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _on_token_created(token) -> None:
         """Create sensor entities when a new token is minted."""
         await async_create_token_sensors(hass, entry, token)
+        schedule_expiry_timer(hass, data, token)
 
     async def _on_token_archived(token_slug: str) -> None:
         """Remove sensor entities when a token is revoked or archived."""
@@ -108,8 +109,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await archive_expired_token(hass, data, token)
 
     await _check_expired_tokens()
+    for _token in store.list_tokens():
+        schedule_expiry_timer(hass, data, _token)
     cancel_expiry = async_track_time_interval(hass, _check_expired_tokens, EXPIRY_CHECK_INTERVAL)
     entry.async_on_unload(cancel_expiry)
+    entry.async_on_unload(lambda: [cancel_expiry_timer(data, tid) for tid in list(data.expiry_timers)])
 
     async def _on_stop(event: Event) -> None:
         audit_task.cancel()
