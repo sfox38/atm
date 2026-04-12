@@ -283,18 +283,26 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 | Log entity names | On | Include entity IDs in audit entries |
 | Log client IP | On | Include caller IP in audit entries |
 | Notify on rate limit | Off | Create a HA notification when a token is rate limited |
+| Audit log flush interval | 15 min | How often to snapshot the in-memory log to disk. Set to "Never" to disable persistence entirely. |
+| Maximum log entries | 10,000 | Capacity of the in-memory buffer and the on-disk snapshot. Reducing this trims the oldest entries immediately. |
 
 ---
 
 ## Audit Log
 
-ATM keeps an in-memory circular buffer of the last 10,000 requests. The log is queryable from the ATM panel or via the admin API.
+ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings.
 
 Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, or `rate_limited`), and client IP.
 
 `not_found` is recorded when an entity is genuinely absent from both HA state and the entity registry. From the caller's perspective it looks identical to `denied`, but the audit log distinguishes them so you can tell whether a token is hitting a missing entity or a permission wall.
 
-The audit log is in-memory only and does not survive an HA restart.
+### Persistence
+
+The audit log is stored in a separate HA storage file (`.storage/atm_audit.json`) and survives HA restarts. On startup, ATM loads the on-disk snapshot back into memory so all previous entries are immediately available for querying.
+
+The flush interval controls how often the in-memory buffer is snapshotted to disk. The default is every 15 minutes. ATM also flushes automatically on HA stop, integration reload, and integration unload. Set the interval to "Never" to keep the log in-memory only and disable all disk writes.
+
+The storage file is included in HA full backups and in partial backups of the `.storage` directory.
 
 ---
 

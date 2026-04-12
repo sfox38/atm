@@ -214,6 +214,8 @@ class GlobalSettings:
     log_entity_names: bool = True
     log_client_ip: bool = True
     notify_on_rate_limit: bool = False
+    audit_flush_interval: int = 15
+    audit_log_maxlen: int = 10000
 
     def to_dict(self) -> dict:
         return {
@@ -225,6 +227,8 @@ class GlobalSettings:
             "log_entity_names": self.log_entity_names,
             "log_client_ip": self.log_client_ip,
             "notify_on_rate_limit": self.notify_on_rate_limit,
+            "audit_flush_interval": self.audit_flush_interval,
+            "audit_log_maxlen": self.audit_log_maxlen,
         }
 
     @classmethod
@@ -238,6 +242,8 @@ class GlobalSettings:
             log_entity_names=data.get("log_entity_names", True),
             log_client_ip=data.get("log_client_ip", True),
             notify_on_rate_limit=data.get("notify_on_rate_limit", False),
+            audit_flush_interval=data.get("audit_flush_interval", 15),
+            audit_log_maxlen=data.get("audit_log_maxlen", 10000),
         )
 
 

@@ -876,8 +876,10 @@ class ATMMcpSseView(HomeAssistantView):
             return _error("service_unavailable", "Service unavailable.", 503, request_id)
 
         _401 = _error("unauthorized", "Unauthorized.", 401, request_id)
+        _401.headers["WWW-Authenticate"] = 'Bearer realm="ATM"'
 
         for key in ("token", "access_token"):
+
             if key in request.query:
                 return _401
 

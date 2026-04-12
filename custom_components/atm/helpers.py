@@ -157,6 +157,7 @@ async def get_authenticated_token(
         return build_error_response("service_unavailable", "Service unavailable.", 503, request_id)
 
     _401 = build_error_response("unauthorized", "Unauthorized.", 401, request_id)
+    _401.headers["WWW-Authenticate"] = 'Bearer realm="ATM"'
 
     for key in ("token", "access_token"):
         if key in request.query:

@@ -24,7 +24,7 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
     api.getInfo().then((info) => setAtmVersion(info.version)).catch(() => {});
   }, []);
 
-  async function patchSetting(key: keyof GlobalSettings, value: boolean) {
+  async function patchSetting(key: keyof GlobalSettings, value: boolean | number) {
     setSaving(true);
     setError(null);
     try {
@@ -55,6 +55,45 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
           onToggle={patchSetting}
           saving={saving}
         />
+        <hr style={{ border: "none", borderTop: "1px solid var(--divider-color, #e0e0e0)", margin: "8px 0" }} />
+        <div className="toggle-row" style={{ marginTop: 8, opacity: settings.disable_all_logging ? 0.5 : 1 }}>
+          <div className="toggle-label">
+            <span>Audit log flush interval</span>
+            <small>How often to snapshot the audit log to disk. "Never" keeps the log in-memory only.</small>
+          </div>
+          <select
+            className="input"
+            style={{ flex: "0 0 auto", width: "auto" }}
+            value={settings.audit_flush_interval}
+            disabled={saving || settings.disable_all_logging}
+            onChange={(e) => patchSetting("audit_flush_interval", Number(e.target.value))}
+          >
+            <option value={0}>Never</option>
+            <option value={5}>Every 5 minutes</option>
+            <option value={10}>Every 10 minutes</option>
+            <option value={15}>Every 15 minutes</option>
+            <option value={30}>Every 30 minutes</option>
+            <option value={60}>Every 60 minutes</option>
+          </select>
+        </div>
+        <div className="toggle-row" style={{ opacity: settings.disable_all_logging ? 0.5 : 1 }}>
+          <div className="toggle-label">
+            <span>Maximum log entries</span>
+            <small>Capacity of the in-memory buffer and the on-disk snapshot. Reducing this trims the oldest entries immediately.</small>
+          </div>
+          <select
+            className="input"
+            style={{ flex: "0 0 auto", width: "auto" }}
+            value={settings.audit_log_maxlen}
+            disabled={saving || settings.disable_all_logging}
+            onChange={(e) => patchSetting("audit_log_maxlen", Number(e.target.value))}
+          >
+            <option value={100}>100</option>
+            <option value={1000}>1,000</option>
+            <option value={5000}>5,000</option>
+            <option value={10000}>10,000</option>
+          </select>
+        </div>
       </div>
 
       <div className="card">
@@ -97,7 +136,7 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
           Data Management
         </div>
         <p style={{ fontSize: 13, marginTop: 0 }}>
-          Permanently deletes all active tokens, archived records, permission trees, capability flags, settings, and the in-memory audit log. All tokens are immediately invalidated.
+          Permanently deletes all active tokens, archived records, permission trees, capability flags, settings, the in-memory audit log, and the on-disk audit log snapshot. All tokens are immediately invalidated.
         </p>
         <button
           className="btn btn-danger"

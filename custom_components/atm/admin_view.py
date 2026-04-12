@@ -745,18 +745,41 @@ class ATMAdminSettingsView(HomeAssistantView):
         if isinstance(body, web.Response):
             return body
 
+        _VALID_FLUSH_INTERVALS = frozenset({0, 5, 10, 15, 30, 60})
+        _VALID_LOG_MAXLENS = frozenset({100, 1000, 5000, 10000})
+
         patchable = {
             k: v for k, v in body.items()
             if k in (
                 "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
                 "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
+                "audit_flush_interval", "audit_log_maxlen",
             )
         }
+
+        if "audit_flush_interval" in patchable:
+            try:
+                patchable["audit_flush_interval"] = int(patchable["audit_flush_interval"])
+            except (TypeError, ValueError):
+                return _err("invalid_request", "audit_flush_interval must be an integer.", 400)
+            if patchable["audit_flush_interval"] not in _VALID_FLUSH_INTERVALS:
+                return _err("invalid_request", f"audit_flush_interval must be one of: {sorted(_VALID_FLUSH_INTERVALS)}.", 400)
+
+        if "audit_log_maxlen" in patchable:
+            try:
+                patchable["audit_log_maxlen"] = int(patchable["audit_log_maxlen"])
+            except (TypeError, ValueError):
+                return _err("invalid_request", "audit_log_maxlen must be an integer.", 400)
+            if patchable["audit_log_maxlen"] not in _VALID_LOG_MAXLENS:
+                return _err("invalid_request", f"audit_log_maxlen must be one of: {sorted(_VALID_LOG_MAXLENS)}.", 400)
 
         old_kill_switch = data.store.get_settings().kill_switch
 
         async with data.store.async_lock:
             updated = await data.store.async_patch_settings(**patchable)
+
+        if "audit_log_maxlen" in patchable:
+            data.audit.resize(patchable["audit_log_maxlen"])
 
         if "kill_switch" in patchable:
             new_kill_switch = updated.kill_switch
@@ -793,7 +816,7 @@ class ATMAdminWipeView(HomeAssistantView):
         data.rate_limiter.destroy_all()
         data.rate_limit_notified.clear()
         data.token_counters.clear()
-        data.audit.clear()
+        await data.audit.async_wipe()
 
         active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
         await data.store.async_wipe()
