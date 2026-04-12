@@ -1,0 +1,12 @@
+{
+  "domain": "atm",
+  "name": "Advanced Token Management",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/sfox38/atm",
+  "issue_tracker": "https://github.com/sfox38/atm/issues",
+  "codeowners": ["@sfox38"],
+  "iot_class": "calculated",
+  "dependencies": ["frontend"],
+  "requirements": []
+}

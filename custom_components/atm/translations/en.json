@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Advanced Token Management",
+        "description": "Click Submit to install the ATM integration. Please note only one instance can be configured at a time"
+      }
+    },
+    "abort": {
+      "already_configured": "ATM is already configured."
+    },
+    "create_entry": {
+      "default": "Use the ATM panel to manage your tokens"
+    }
+  }}

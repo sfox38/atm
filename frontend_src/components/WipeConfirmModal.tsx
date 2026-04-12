@@ -1,0 +1,59 @@
+import React, { useState } from "react";
+import { api } from "../api";
+
+interface Props {
+  onWiped: () => void;
+  onClose: () => void;
+}
+
+export function WipeConfirmModal({ onWiped, onClose }: Props) {
+  const [typed, setTyped] = useState("");
+  const [wiping, setWiping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doWipe() {
+    setWiping(true);
+    setError(null);
+    try {
+      await api.wipe();
+      onWiped();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Wipe failed.");
+      setWiping(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h3 className="modal-title" style={{ color: "var(--error-color, #f44336)" }}>
+          Wipe All ATM Data
+        </h3>
+        <div className="banner banner-error" style={{ marginBottom: 16 }}>
+          This will permanently delete all active tokens, archived records, permission trees, capability flags, global settings, and the in-memory audit log. All running ATM tokens will be immediately invalidated and open connections terminated. This cannot be undone.
+        </div>
+        <div className="field">
+          <label>Type WIPE to confirm</label>
+          <input
+            className="input"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="WIPE"
+            autoFocus
+          />
+        </div>
+        {error && <div className="banner banner-error">{error}</div>}
+        <div className="modal-actions">
+          <button className="btn btn-text" onClick={onClose} disabled={wiping}>Cancel</button>
+          <button
+            className="btn btn-danger"
+            onClick={doWipe}
+            disabled={typed !== "WIPE" || wiping}
+          >
+            {wiping ? "Wiping..." : "Wipe All Data"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
