@@ -13,6 +13,7 @@ from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import MAX_REQUEST_BODY_BYTES, TOKEN_LENGTH, TOKEN_PREFIX
 from .policy_engine import parse_relative_time
+from .token_store import token_name_slug
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -20,11 +21,6 @@ if TYPE_CHECKING:
     from .data import ATMData
     from .rate_limiter import RateLimitResult
     from .token_store import TokenRecord
-
-
-def token_name_slug(name: str) -> str:
-    """Return the lowercase, hyphen-normalized slug for a token name."""
-    return name.lower().replace("-", "_")
 
 
 def build_error_response(

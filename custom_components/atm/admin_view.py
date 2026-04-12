@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import uuid
 from typing import Any
 
 from aiohttp import web
@@ -16,24 +17,26 @@ from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES,
 from .data import ATMData
 from .helpers import terminate_token_connections, token_name_slug
 from .policy_engine import Permission, filter_entities_for_token, resolve
-from .token_store import PermissionTree, PermissionNode
+from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES
 
 
 def _err(code: str, message: str, status: int) -> web.Response:
-    """Return a JSON error response."""
+    """Return a JSON error response with a unique X-ATM-Request-ID header."""
     return web.Response(
         status=status,
         content_type="application/json",
         text=json.dumps({"error": code, "message": message}),
+        headers={"X-ATM-Request-ID": str(uuid.uuid4())},
     )
 
 
 def _ok(body: Any, status: int = 200) -> web.Response:
-    """Return a JSON success response."""
+    """Return a JSON success response with a unique X-ATM-Request-ID header."""
     return web.Response(
         status=status,
         content_type="application/json",
         text=json.dumps(body),
+        headers={"X-ATM-Request-ID": str(uuid.uuid4())},
     )
 
 
@@ -210,9 +213,6 @@ def _build_resolution_path(entity_id: str, token: Any, hass: Any) -> list[dict]:
     return path
 
 
-_VALID_NODE_STATES = frozenset({"GREY", "YELLOW", "GREEN", "RED"})
-
-
 class ATMAdminInfoView(HomeAssistantView):
     """GET /api/atm/admin/info - integration metadata."""
 
@@ -305,6 +305,9 @@ class ATMAdminTokensView(HomeAssistantView):
         except (TypeError, ValueError):
             return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be integers.", 400)
 
+        if rate_limit_requests < 0 or rate_limit_burst < 0:
+            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be non-negative.", 400)
+
         record, raw_token = await data.store.async_create_token(
             name=name,
             created_by=user.id,
@@ -366,6 +369,14 @@ class ATMAdminTokenView(HomeAssistantView):
                          "allow_automation_write", "allow_config_read",
                          "allow_template_render", "allow_restart")
             }
+            for rl_field in ("rate_limit_requests", "rate_limit_burst"):
+                if rl_field in patchable:
+                    try:
+                        patchable[rl_field] = int(patchable[rl_field])
+                    except (TypeError, ValueError):
+                        return _err("invalid_request", f"{rl_field} must be an integer.", 400)
+                    if patchable[rl_field] < 0:
+                        return _err("invalid_request", f"{rl_field} must be non-negative.", 400)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
         return _ok(updated.to_dict())
@@ -776,8 +787,6 @@ class ATMAdminWipeView(HomeAssistantView):
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
 
-        active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
-
         for token_id in list(data.sse_connections.keys()):
             await terminate_token_connections(token_id, data.sse_connections)
 
@@ -786,6 +795,7 @@ class ATMAdminWipeView(HomeAssistantView):
         data.token_counters.clear()
         data.audit.clear()
 
+        active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
         await data.store.async_wipe()
 
         if data.async_on_token_archived:

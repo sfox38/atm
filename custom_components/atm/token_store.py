@@ -350,8 +350,8 @@ class TokenStore:
 
     def name_slug_exists(self, name: str) -> bool:
         """Return True if a token with an equivalent slug already exists."""
-        slug = _slugify(name)
-        return any(_slugify(t.name) == slug for t in self._tokens.values())
+        slug = token_name_slug(name)
+        return any(token_name_slug(t.name) == slug for t in self._tokens.values())
 
     async def async_archive_token(
         self,
@@ -366,6 +366,7 @@ class TokenStore:
         token = self._tokens.pop(token_id, None)
         if token is None:
             return None
+        token.revoked = True
         archived = ArchivedTokenRecord(
             id=token.id,
             name=token.name,
@@ -492,8 +493,8 @@ class TokenStore:
         await self.async_save()
 
 
-def _slugify(name: str) -> str:
-    """Normalize a token name for duplicate detection (lowercase, hyphens to underscores)."""
+def token_name_slug(name: str) -> str:
+    """Normalize a token name to a slug (lowercase, hyphens to underscores)."""
     return name.lower().replace("-", "_")
 
 

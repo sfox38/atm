@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -108,7 +109,8 @@ class ATMTokenSensor(SensorEntity):
         if sensor_type == "expires_in":
             if token.expires_at is None:
                 return -1
-            return max(0, (token.expires_at - utcnow()).days)
+            delta = token.expires_at - utcnow()
+            return max(0, math.ceil(delta.total_seconds() / 86400))
 
         return None
 
