@@ -905,6 +905,8 @@ class ATMMcpSseView(HomeAssistantView):
         # probe connection counts via 429 vs 401 differential timing.
         current_count = len(data.sse_connections.get(token.id, set()))
         if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
+            _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
+                 outcome="rate_limited", client_ip=client_ip)
             return _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
 
         rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
