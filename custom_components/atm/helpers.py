@@ -256,7 +256,9 @@ async def archive_expired_token(
     now = utcnow()
     slug = token_name_slug(token.name)
     cancel_expiry_timer(data, token.id)
-    await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
+    archived = await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
+    if archived is None:
+        return
     await terminate_token_connections(token.id, data.sse_connections)
     data.rate_limiter.destroy(token.id)
     data.rate_limit_notified.pop(token.id, None)

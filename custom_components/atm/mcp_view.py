@@ -6,6 +6,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -17,6 +18,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
+
+_LOGGER = logging.getLogger(__name__)
 from .const import (
     ATM_VERSION,
     BLOCKED_DOMAINS,
@@ -302,6 +305,7 @@ async def _tool_get_history(
         )
         result = await get_instance(hass).async_add_executor_job(fn)
     except Exception:
+        _LOGGER.warning("MCP history call failed for entity %s", entity_id, exc_info=True)
         return _tool_error("History call failed."), "denied", entity_id
 
     output = {}
@@ -372,6 +376,7 @@ async def _tool_get_statistics(
         )
         result = await get_instance(hass).async_add_executor_job(fn)
     except Exception:
+        _LOGGER.warning("MCP statistics call failed for entity %s", entity_id, exc_info=True)
         return _tool_error("Statistics call failed."), "denied", entity_id
 
     return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
@@ -525,6 +530,17 @@ async def _tool_render_template(
             "label_areas": lambda *a, **kw: [],
             "floor_entities": lambda *a, **kw: [],
             "floor_areas": lambda *a, **kw: [],
+            # Block topology-enumeration globals that reveal unpermitted instance structure.
+            "device_attr": lambda *a, **kw: None,
+            "device_id": lambda *a, **kw: None,
+            "areas": lambda *a, **kw: [],
+            "labels": lambda *a, **kw: [],
+            "label_id": lambda *a, **kw: None,
+            "label_name": lambda *a, **kw: None,
+            "floors": lambda *a, **kw: [],
+            "floor_id": lambda *a, **kw: None,
+            "floor_name": lambda *a, **kw: None,
+            "closest": lambda *a, **kw: None,
         })
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
@@ -543,7 +559,7 @@ async def _tool_automation_stub(
             "Automation tools are not yet implemented in ATM v1. "
             "Use ha-mcp or the HA native MCP endpoint for automation management."
         ),
-        "denied",
+        "allowed",
         tool_name,
     )
 
@@ -788,6 +804,8 @@ async def _dispatch_mcp(
         return resp, "initialize", "/api/atm/mcp", "allowed"
 
     if method in ("notifications/initialized", "initialized"):
+        _log(data, token, request_id=request_id, method=method,
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
         return None, method, "/api/atm/mcp", "allowed"
 
     if method == "ping":
@@ -926,47 +944,58 @@ class ATMMcpSseView(HomeAssistantView):
 
         session_id = str(uuid.uuid4())
         queue: asyncio.Queue = asyncio.Queue()
-        data.mcp_sessions[session_id] = (queue, token.id)
 
+        data.mcp_sessions[session_id] = (queue, token.id)
         if token.id not in data.sse_connections:
             data.sse_connections[token.id] = set()
         data.sse_connections[token.id].add(queue)
 
-        response = web.StreamResponse()
-        response.headers["Content-Type"] = "text/event-stream"
-        response.headers["Cache-Control"] = "no-cache"
-        response.headers["X-Accel-Buffering"] = "no"
-        response.headers["X-ATM-Request-ID"] = request_id
-        await response.prepare(request)
-
-        base_url = str(request.url.origin())
-        messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
-        await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
-
-        try:
-            while True:
-                try:
-                    msg = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
-                    )
-                except asyncio.TimeoutError:
-                    await response.write(b": heartbeat\n\n")
-                    continue
-                if msg is None:
-                    break
-                await response.write(
-                    f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
-                )
-        except (ConnectionResetError, asyncio.CancelledError):
-            pass
-        finally:
+        def _cleanup() -> None:
             data.mcp_sessions.pop(session_id, None)
             conns = data.sse_connections.get(token.id)
             if conns is not None:
                 conns.discard(queue)
                 if not conns:
                     data.sse_connections.pop(token.id, None)
+
+        response = web.StreamResponse()
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        response.headers["X-ATM-Request-ID"] = request_id
+
+        try:
+            await response.prepare(request)
+
+            # Re-check token after queue insertion to close the TOCTOU window where
+            # a DELETE/archive could have run between auth check and queue add.
+            if data.store.get_token_by_id(token.id) is None:
+                _cleanup()
+                return _error("unauthorized", "Unauthorized.", 401, request_id)
+
+            base_url = str(request.url.origin())
+            messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
+            await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
+
+            try:
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
+                        )
+                    except asyncio.TimeoutError:
+                        await response.write(b": heartbeat\n\n")
+                        continue
+                    if msg is None:
+                        break
+                    await response.write(
+                        f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
+                    )
+            except (ConnectionResetError, asyncio.CancelledError):
+                pass
+        finally:
+            _cleanup()
 
         return response
 
@@ -990,7 +1019,7 @@ class ATMMcpSseView(HomeAssistantView):
         body = body_result
 
         if body.get("jsonrpc") != "2.0":
-            return web.Response(status=400, text="Invalid JSON-RPC request")
+            return _error("invalid_request", "Invalid JSON-RPC request.", 400, request_id)
 
         msg_id = body.get("id")
         method = body.get("method", "")
@@ -1001,14 +1030,19 @@ class ATMMcpSseView(HomeAssistantView):
         )
 
         if response_msg is None:
-            return web.Response(status=202)
+            return web.Response(status=202, headers={"X-ATM-Request-ID": request_id})
 
-        return web.Response(
+        resp = web.Response(
             status=200,
             content_type="application/json",
             text=json.dumps(response_msg, default=str),
             headers={"X-ATM-Request-ID": request_id},
         )
+        if token.rate_limit_requests > 0:
+            resp.headers["X-RateLimit-Limit"] = str(token.rate_limit_requests)
+            resp.headers["X-RateLimit-Remaining"] = str(rl_result.remaining)
+            resp.headers["X-RateLimit-Reset"] = str(rl_result.reset)
+        return resp
 
 
 class ATMMcpMessagesView(HomeAssistantView):

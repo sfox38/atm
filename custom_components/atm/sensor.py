@@ -46,7 +46,7 @@ class ATMTokenSensor(SensorEntity):
     """
 
     _attr_should_poll = False
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     _NUMERIC_TYPES = frozenset({"request_count", "denied_count", "rate_limit_hits", "expires_in"})
     _COUNT_TYPES = frozenset({"request_count", "denied_count", "rate_limit_hits"})
@@ -63,10 +63,10 @@ class ATMTokenSensor(SensorEntity):
         self._sensor_type = sensor_type
         self._data = data
         self._attr_unique_id = f"atm_{slug}_{sensor_type}"
-        self._attr_name = f"ATM {token.name} {sensor_type.replace('_', ' ').title()}"
+        self._attr_name = sensor_type.replace("_", " ").title()
 
         if sensor_type in self._COUNT_TYPES:
-            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         elif sensor_type == "expires_in":
             self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_native_unit_of_measurement = "d"

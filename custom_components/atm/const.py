@@ -40,6 +40,17 @@ SENSITIVE_ATTRIBUTES = frozenset({
 
 BLOCKED_DOMAINS = frozenset({"atm"})
 
+HIGH_RISK_DOMAINS = frozenset({
+    "homeassistant",
+    "recorder",
+    "system_log",
+    "hassio",
+    "backup",
+    "notify",
+    "persistent_notification",
+    "mqtt",
+})
+
 DUAL_GATE_SERVICES = frozenset({
     "homeassistant/restart",
     "homeassistant/stop",

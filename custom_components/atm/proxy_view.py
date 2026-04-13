@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from aiohttp import web
@@ -11,6 +12,8 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 
 from .audit import generate_request_id
+
+_LOGGER = logging.getLogger(__name__)
 from .const import (
     BLOCKED_DOMAINS,
     DOMAIN,
@@ -352,6 +355,7 @@ class ATMHistoryView(HomeAssistantView):
             )
             history_result = await get_instance(hass).async_add_executor_job(fn)
         except Exception:
+            _LOGGER.warning("History call failed for request %s", request_id, exc_info=True)
             return _error("gateway_timeout", "History call failed.", 504, request_id)
 
         limit_int: int | None = None
@@ -461,6 +465,7 @@ class ATMStatisticsView(HomeAssistantView):
             )
             stat_result = await get_instance(hass).async_add_executor_job(fn)
         except Exception:
+            _LOGGER.warning("Statistics call failed for request %s", request_id, exc_info=True)
             return _error("gateway_timeout", "Statistics call failed.", 504, request_id)
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
@@ -588,6 +593,17 @@ class ATMTemplateView(HomeAssistantView):
                 "label_areas": lambda *a, **kw: [],
                 "floor_entities": lambda *a, **kw: [],
                 "floor_areas": lambda *a, **kw: [],
+                # Block topology-enumeration globals that reveal unpermitted instance structure.
+                "device_attr": lambda *a, **kw: None,
+                "device_id": lambda *a, **kw: None,
+                "areas": lambda *a, **kw: [],
+                "labels": lambda *a, **kw: [],
+                "label_id": lambda *a, **kw: None,
+                "label_name": lambda *a, **kw: None,
+                "floors": lambda *a, **kw: [],
+                "floor_id": lambda *a, **kw: None,
+                "floor_name": lambda *a, **kw: None,
+                "closest": lambda *a, **kw: None,
             })
         except Exception:
             return _error(
@@ -664,21 +680,10 @@ class ATMServicesView(HomeAssistantView):
                 if domain not in BLOCKED_DOMAINS
             }
         else:
-            from homeassistant.helpers import entity_registry as _er
             writable_domains: set[str] = set()
-            for domain_name, node in token.permissions.domains.items():
-                if node.state == "GREEN":
-                    writable_domains.add(domain_name)
-            for eid, node in token.permissions.entities.items():
-                if node.state == "GREEN":
-                    writable_domains.add(eid.split(".")[0])
-            if token.permissions.devices:
-                _er_reg = _er.async_get(hass)
-                for device_id_key, node in token.permissions.devices.items():
-                    if node.state == "GREEN":
-                        for entry in _er_reg.entities.values():
-                            if entry.device_id == device_id_key and not entry.disabled_by:
-                                writable_domains.add(entry.domain)
+            for state in hass.states.async_all():
+                if resolve(state.entity_id, token, hass) == Permission.WRITE:
+                    writable_domains.add(state.entity_id.split(".")[0])
             filtered = {
                 domain: svcs
                 for domain, svcs in all_services.items()

@@ -474,10 +474,11 @@ class TokenStore:
 
     async def async_delete_archived(self, token_id: str) -> bool:
         """Permanently delete an archived token record. Returns False if not found."""
-        if token_id not in self._archived:
-            return False
-        del self._archived[token_id]
-        await self.async_save()
+        async with self.async_lock:
+            if token_id not in self._archived:
+                return False
+            del self._archived[token_id]
+            await self.async_save()
         return True
 
     def get_settings(self) -> GlobalSettings:

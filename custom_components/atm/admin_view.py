@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -19,62 +20,66 @@ from .helpers import terminate_token_connections, token_name_slug
 from .policy_engine import Permission, filter_entities_for_token, resolve
 from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES
 
+_LOGGER = logging.getLogger(__name__)
 
-def _err(code: str, message: str, status: int) -> web.Response:
-    """Return a JSON error response with a unique X-ATM-Request-ID header."""
+
+def _err(code: str, message: str, status: int, request_id: str = "") -> web.Response:
+    """Return a JSON error response. Uses request_id if supplied, else generates one."""
+    rid = request_id or str(uuid.uuid4())
     return web.Response(
         status=status,
         content_type="application/json",
         text=json.dumps({"error": code, "message": message}),
-        headers={"X-ATM-Request-ID": str(uuid.uuid4())},
+        headers={"X-ATM-Request-ID": rid},
     )
 
 
-def _ok(body: Any, status: int = 200) -> web.Response:
-    """Return a JSON success response with a unique X-ATM-Request-ID header."""
+def _ok(body: Any, status: int = 200, request_id: str = "") -> web.Response:
+    """Return a JSON success response. Uses request_id if supplied, else generates one."""
+    rid = request_id or str(uuid.uuid4())
     return web.Response(
         status=status,
         content_type="application/json",
         text=json.dumps(body),
-        headers={"X-ATM-Request-ID": str(uuid.uuid4())},
+        headers={"X-ATM-Request-ID": rid},
     )
 
 
-def _check_admin(request: web.Request) -> web.Response | None:
-    """Return a 403 response if the request user is not an HA admin, else None."""
-    user = request.get(KEY_HASS_USER)
-    if not user or not user.is_admin:
-        return _err("forbidden", "Admin access required.", 403)
-    return None
-
-
 def require_admin(method):
-    """Decorator for HomeAssistantView methods that require HA admin privileges."""
+    """Decorator for HomeAssistantView methods that require HA admin privileges.
+
+    Generates a per-request ID, stashes it on the request object as 'atm_rid',
+    and logs every admin API call so the ID can be correlated with response headers.
+    """
     @functools.wraps(method)
     async def wrapper(self, request: web.Request, **kwargs):
-        err = _check_admin(request)
-        if err:
-            return err
+        request_id = str(uuid.uuid4())
+        request["atm_rid"] = request_id
+        user = request.get(KEY_HASS_USER)
+        if not user or not user.is_admin:
+            _LOGGER.debug("Admin %s %s unauthorized rid=%s", request.method, request.path, request_id)
+            return _err("forbidden", "Admin access required.", 403, request_id)
+        _LOGGER.debug("Admin %s %s rid=%s user=%s", request.method, request.path, request_id, user.id)
         return await method(self, request, **kwargs)
     return wrapper
 
 
-async def _read_body(request: web.Request) -> dict | web.Response:
+async def _read_body(request: web.Request, request_id: str = "") -> dict | web.Response:
     """Read and parse the request body as a JSON object.
 
     Returns an empty dict for requests with no body. Returns an error response
     on read failure, invalid JSON, or a non-object body.
     """
     if request.content_length is not None and request.content_length > MAX_REQUEST_BODY_BYTES:
-        return _err("request_too_large", "Request body too large.", 413)
+        return _err("request_too_large", "Request body too large.", 413, request_id)
 
     try:
         body_bytes = await request.read()
     except Exception:
-        return _err("invalid_request", "Failed to read request body.", 400)
+        return _err("invalid_request", "Failed to read request body.", 400, request_id)
 
     if len(body_bytes) > MAX_REQUEST_BODY_BYTES:
-        return _err("request_too_large", "Request body too large.", 413)
+        return _err("request_too_large", "Request body too large.", 413, request_id)
 
     if not body_bytes:
         return {}
@@ -82,10 +87,10 @@ async def _read_body(request: web.Request) -> dict | web.Response:
     try:
         parsed = json.loads(body_bytes)
     except json.JSONDecodeError:
-        return _err("invalid_request", "Invalid JSON body.", 400)
+        return _err("invalid_request", "Invalid JSON body.", 400, request_id)
 
     if not isinstance(parsed, dict):
-        return _err("invalid_request", "Request body must be a JSON object.", 400)
+        return _err("invalid_request", "Request body must be a JSON object.", 400, request_id)
 
     return parsed
 
@@ -222,7 +227,7 @@ class ATMAdminInfoView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
-        return _ok({"version": ATM_VERSION})
+        return _ok({"version": ATM_VERSION}, request_id=request["atm_rid"])
 
 
 class ATMAdminArchivedTokensView(HomeAssistantView):
@@ -236,7 +241,7 @@ class ATMAdminArchivedTokensView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         data: ATMData = self.hass.data[DOMAIN]
         archived = [t.to_dict() for t in data.store.list_archived()]
-        return _ok(archived)
+        return _ok(archived, request_id=request["atm_rid"])
 
 
 class ATMAdminArchivedTokenView(HomeAssistantView):
@@ -248,11 +253,12 @@ class ATMAdminArchivedTokenView(HomeAssistantView):
 
     @require_admin
     async def delete(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
         deleted = await data.store.async_delete_archived(token_id)
         if not deleted:
-            return _err("not_found", "Archived token not found.", 404)
-        return web.Response(status=204)
+            return _err("not_found", "Archived token not found.", 404, rid)
+        return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
 
 class ATMAdminTokensView(HomeAssistantView):
@@ -268,54 +274,55 @@ class ATMAdminTokensView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         data: ATMData = self.hass.data[DOMAIN]
         tokens = [t.to_dict() for t in data.store.list_tokens()]
-        return _ok(tokens)
+        return _ok(tokens, request_id=request["atm_rid"])
 
     @require_admin
     async def post(self, request: web.Request) -> web.Response:
 
+        rid = request["atm_rid"]
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
         user = request[KEY_HASS_USER]
 
-        body = await _read_body(request)
+        body = await _read_body(request, rid)
         if isinstance(body, web.Response):
             return body
 
         name = body.get("name")
         if not name or not isinstance(name, str):
-            return _err("invalid_request", "name is required.", 400)
+            return _err("invalid_request", "name is required.", 400, rid)
         if not TOKEN_NAME_REGEX.match(name):
-            return _err("invalid_request", "name does not match required pattern.", 400)
-        if data.store.name_slug_exists(name):
-            return _err("invalid_request", "A token with that name (or equivalent slug) already exists.", 409)
-
+            return _err("invalid_request", "name does not match required pattern.", 400, rid)
         pass_through = bool(body.get("pass_through", False))
         if pass_through and not body.get("confirm_pass_through"):
-            return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400)
+            return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
         expires_at = None
         if "expires_at" in body:
             expires_at = parse_datetime(body["expires_at"])
             if expires_at is None:
-                return _err("invalid_request", "Invalid expires_at datetime.", 400)
+                return _err("invalid_request", "Invalid expires_at datetime.", 400, rid)
 
         try:
             rate_limit_requests = int(body.get("rate_limit_requests", 60))
             rate_limit_burst = int(body.get("rate_limit_burst", 10))
         except (TypeError, ValueError):
-            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be integers.", 400)
+            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be integers.", 400, rid)
 
         if rate_limit_requests < 0 or rate_limit_burst < 0:
-            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be non-negative.", 400)
+            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be non-negative.", 400, rid)
 
-        record, raw_token = await data.store.async_create_token(
-            name=name,
-            created_by=user.id,
-            expires_at=expires_at,
-            pass_through=pass_through,
-            rate_limit_requests=rate_limit_requests,
-            rate_limit_burst=rate_limit_burst,
-        )
+        async with data.store.async_lock:
+            if data.store.name_slug_exists(name):
+                return _err("invalid_request", "A token with that name (or equivalent slug) already exists.", 409, rid)
+            record, raw_token = await data.store.async_create_token(
+                name=name,
+                created_by=user.id,
+                expires_at=expires_at,
+                pass_through=pass_through,
+                rate_limit_requests=rate_limit_requests,
+                rate_limit_burst=rate_limit_burst,
+            )
 
         if data.async_on_token_created:
             await data.async_on_token_created(record)
@@ -323,7 +330,7 @@ class ATMAdminTokensView(HomeAssistantView):
         # raw_token is included once in the creation response and never again.
         response_body = record.to_dict()
         response_body["token"] = raw_token
-        return _ok(response_body, status=201)
+        return _ok(response_body, status=201, request_id=rid)
 
 
 class ATMAdminTokenView(HomeAssistantView):
@@ -335,33 +342,35 @@ class ATMAdminTokenView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
-        return _ok(token.to_dict())
+            return _err("not_found", "Token not found.", 404, rid)
+        return _ok(token.to_dict(), request_id=rid)
 
     @require_admin
     async def patch(self, request: web.Request, token_id: str) -> web.Response:
 
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
 
-        body = await _read_body(request)
+        body = await _read_body(request, rid)
         if isinstance(body, web.Response):
             return body
 
         if "name" in body or "expires_at" in body:
-            return _err("invalid_request", "name and expires_at are immutable after token creation.", 400)
+            return _err("invalid_request", "name and expires_at are immutable after token creation.", 400, rid)
 
         async with data.store.async_lock:
             token = data.store.get_token_by_id(token_id)
             if token is None:
-                return _err("not_found", "Token not found.", 404)
+                return _err("not_found", "Token not found.", 404, rid)
 
             if "pass_through" in body:
                 enabling = bool(body["pass_through"])
                 if enabling and not token.pass_through and not body.get("confirm_pass_through"):
-                    return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400)
+                    return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
             patchable = {
                 k: v for k, v in body.items()
@@ -374,17 +383,18 @@ class ATMAdminTokenView(HomeAssistantView):
                     try:
                         patchable[rl_field] = int(patchable[rl_field])
                     except (TypeError, ValueError):
-                        return _err("invalid_request", f"{rl_field} must be an integer.", 400)
+                        return _err("invalid_request", f"{rl_field} must be an integer.", 400, rid)
                     if patchable[rl_field] < 0:
-                        return _err("invalid_request", f"{rl_field} must be non-negative.", 400)
+                        return _err("invalid_request", f"{rl_field} must be non-negative.", 400, rid)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
-        return _ok(updated.to_dict())
+        return _ok(updated.to_dict(), request_id=rid)
 
     @require_admin
     async def delete(self, request: web.Request, token_id: str) -> web.Response:
         """Revoke a token. Archives it, terminates its SSE connections, fires the bus event."""
 
+        rid = request["atm_rid"]
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
         user = request[KEY_HASS_USER]
@@ -392,14 +402,14 @@ class ATMAdminTokenView(HomeAssistantView):
         async with data.store.async_lock:
             token = data.store.get_token_by_id(token_id)
             if token is None:
-                return _err("not_found", "Token not found.", 404)
+                return _err("not_found", "Token not found.", 404, rid)
 
             token_name = token.name
             now = utcnow()
 
             archived = await data.store.async_archive_token(token_id, revoked=True, revoked_at=now)
             if archived is None:
-                return _err("not_found", "Token not found.", 404)
+                return _err("not_found", "Token not found.", 404, rid)
 
         await terminate_token_connections(token_id, data.sse_connections)
         data.rate_limiter.destroy(token_id)
@@ -419,7 +429,7 @@ class ATMAdminTokenView(HomeAssistantView):
         if data.async_on_token_archived:
             await data.async_on_token_archived(slug)
 
-        return web.Response(status=204)
+        return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
 
 class ATMAdminPermissionsView(HomeAssistantView):
@@ -431,33 +441,35 @@ class ATMAdminPermissionsView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
-        return _ok(token.permissions.to_dict())
+            return _err("not_found", "Token not found.", 404, rid)
+        return _ok(token.permissions.to_dict(), request_id=rid)
 
     @require_admin
     async def put(self, request: web.Request, token_id: str) -> web.Response:
 
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
 
-        body = await _read_body(request)
+        body = await _read_body(request, rid)
         if isinstance(body, web.Response):
             return body
 
         try:
             new_tree = PermissionTree.from_dict(body)
         except Exception:
-            return _err("invalid_request", "Invalid permission tree structure.", 400)
+            return _err("invalid_request", "Invalid permission tree structure.", 400, rid)
 
         async with data.store.async_lock:
             token = data.store.get_token_by_id(token_id)
             if token is None:
-                return _err("not_found", "Token not found.", 404)
+                return _err("not_found", "Token not found.", 404, rid)
 
             updated = await data.store.async_set_permissions(token_id, new_tree)
-        return _ok(updated.permissions.to_dict())
+        return _ok(updated.permissions.to_dict(), request_id=rid)
 
 
 class ATMAdminPermissionDomainView(HomeAssistantView):
@@ -501,34 +513,36 @@ async def _patch_permission_node(
     node_id: str,
 ) -> web.Response:
     """Shared handler for PATCH on domain/device/entity permission nodes."""
-    err = _check_admin(request)
-    if err:
-        return err
+    rid = request.get("atm_rid") or str(uuid.uuid4())
+    user = request.get(KEY_HASS_USER)
+    if not user or not user.is_admin:
+        _LOGGER.debug("Admin %s %s unauthorized rid=%s", request.method, request.path, rid)
+        return _err("forbidden", "Admin access required.", 403, rid)
 
     data: ATMData = hass.data[DOMAIN]
 
-    body = await _read_body(request)
+    body = await _read_body(request, rid)
     if isinstance(body, web.Response):
         return body
 
     state = body.get("state")
     if state not in _VALID_NODE_STATES:
-        return _err("invalid_request", f"state must be one of: {', '.join(sorted(_VALID_NODE_STATES))}.", 400)
+        return _err("invalid_request", f"state must be one of: {', '.join(sorted(_VALID_NODE_STATES))}.", 400, rid)
 
     hint = body.get("hint")
     if hint is not None and not isinstance(hint, str):
-        return _err("invalid_request", "hint must be a string.", 400)
+        return _err("invalid_request", "hint must be a string.", 400, rid)
 
     async with data.store.async_lock:
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
+            return _err("not_found", "Token not found.", 404, rid)
 
         updated = await data.store.async_patch_permission_node(
             token_id, node_type, node_id, state, hint
         )
 
-    return _ok(updated.permissions.to_dict())
+    return _ok(updated.permissions.to_dict(), request_id=rid)
 
 
 class ATMAdminResolveView(HomeAssistantView):
@@ -540,11 +554,12 @@ class ATMAdminResolveView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
+            return _err("not_found", "Token not found.", 404, rid)
 
         perm = resolve(entity_id, token, hass)
         resolution_path = _build_resolution_path(entity_id, token, hass)
@@ -561,7 +576,7 @@ class ATMAdminResolveView(HomeAssistantView):
             "entity_id": entity_id,
             "resolution_path": resolution_path,
             "effective": effective_map.get(perm, "NO_ACCESS"),
-        })
+        }, request_id=rid)
 
 
 class ATMAdminScopeView(HomeAssistantView):
@@ -573,11 +588,12 @@ class ATMAdminScopeView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
+            return _err("not_found", "Token not found.", 404, rid)
 
         all_states = hass.states.async_all()
         readable: list[str] = []
@@ -603,7 +619,7 @@ class ATMAdminScopeView(HomeAssistantView):
                 "allow_template_render": token.allow_template_render,
                 "allow_restart": token.allow_restart,
             },
-        })
+        }, request_id=rid)
 
 
 class ATMAdminEntityTreeView(HomeAssistantView):
@@ -615,6 +631,7 @@ class ATMAdminEntityTreeView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
 
@@ -626,7 +643,7 @@ class ATMAdminEntityTreeView(HomeAssistantView):
                 data.entity_tree_cache = await _build_entity_tree(hass)
                 data.entity_tree_cache_valid = True
 
-        return _ok(data.entity_tree_cache)
+        return _ok(data.entity_tree_cache, request_id=rid)
 
 
 class ATMAdminTokenStatsView(HomeAssistantView):
@@ -638,10 +655,11 @@ class ATMAdminTokenStatsView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
+            return _err("not_found", "Token not found.", 404, rid)
 
         counters = data.token_counters.get(token_id, {
             "request_count": 0,
@@ -659,7 +677,7 @@ class ATMAdminTokenStatsView(HomeAssistantView):
             "rate_limit_hits": counters["rate_limit_hits"],
             "last_used_at": last_used,
             "status": "active",
-        })
+        }, request_id=rid)
 
 
 class ATMAdminTokenAuditView(HomeAssistantView):
@@ -671,16 +689,17 @@ class ATMAdminTokenAuditView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
         if token is None:
-            return _err("not_found", "Token not found.", 404)
+            return _err("not_found", "Token not found.", 404, rid)
 
         try:
             limit = min(int(request.query.get("limit", 100)), 500)
             offset = max(int(request.query.get("offset", 0)), 0)
         except ValueError:
-            return _err("invalid_request", "Invalid pagination parameters.", 400)
+            return _err("invalid_request", "Invalid pagination parameters.", 400, rid)
 
         outcome_filter = request.query.get("outcome")
         ip_filter = request.query.get("ip")
@@ -692,7 +711,7 @@ class ATMAdminTokenAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
-        return _ok([e.to_dict() for e in entries])
+        return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
 class ATMAdminAuditView(HomeAssistantView):
@@ -704,13 +723,14 @@ class ATMAdminAuditView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
 
         try:
             limit = min(int(request.query.get("limit", 100)), 500)
             offset = max(int(request.query.get("offset", 0)), 0)
         except ValueError:
-            return _err("invalid_request", "Invalid pagination parameters.", 400)
+            return _err("invalid_request", "Invalid pagination parameters.", 400, rid)
 
         token_id_filter = request.query.get("token_id")
         outcome_filter = request.query.get("outcome")
@@ -723,7 +743,7 @@ class ATMAdminAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
-        return _ok([e.to_dict() for e in entries])
+        return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
 class ATMAdminSettingsView(HomeAssistantView):
@@ -736,14 +756,15 @@ class ATMAdminSettingsView(HomeAssistantView):
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
         data: ATMData = self.hass.data[DOMAIN]
-        return _ok(data.store.get_settings().to_dict())
+        return _ok(data.store.get_settings().to_dict(), request_id=request["atm_rid"])
 
     @require_admin
     async def patch(self, request: web.Request) -> web.Response:
 
+        rid = request["atm_rid"]
         data: ATMData = self.hass.data[DOMAIN]
 
-        body = await _read_body(request)
+        body = await _read_body(request, rid)
         if isinstance(body, web.Response):
             return body
 
@@ -763,17 +784,17 @@ class ATMAdminSettingsView(HomeAssistantView):
             try:
                 patchable["audit_flush_interval"] = int(patchable["audit_flush_interval"])
             except (TypeError, ValueError):
-                return _err("invalid_request", "audit_flush_interval must be an integer.", 400)
+                return _err("invalid_request", "audit_flush_interval must be an integer.", 400, rid)
             if patchable["audit_flush_interval"] not in _VALID_FLUSH_INTERVALS:
-                return _err("invalid_request", f"audit_flush_interval must be one of: {sorted(_VALID_FLUSH_INTERVALS)}.", 400)
+                return _err("invalid_request", f"audit_flush_interval must be one of: {sorted(_VALID_FLUSH_INTERVALS)}.", 400, rid)
 
         if "audit_log_maxlen" in patchable:
             try:
                 patchable["audit_log_maxlen"] = int(patchable["audit_log_maxlen"])
             except (TypeError, ValueError):
-                return _err("invalid_request", "audit_log_maxlen must be an integer.", 400)
+                return _err("invalid_request", "audit_log_maxlen must be an integer.", 400, rid)
             if patchable["audit_log_maxlen"] not in _VALID_LOG_MAXLENS:
-                return _err("invalid_request", f"audit_log_maxlen must be one of: {sorted(_VALID_LOG_MAXLENS)}.", 400)
+                return _err("invalid_request", f"audit_log_maxlen must be one of: {sorted(_VALID_LOG_MAXLENS)}.", 400, rid)
 
         old_kill_switch = data.store.get_settings().kill_switch
 
@@ -790,7 +811,7 @@ class ATMAdminSettingsView(HomeAssistantView):
                 for token_id in list(data.sse_connections.keys()):
                     await terminate_token_connections(token_id, data.sse_connections)
 
-        return _ok(updated.to_dict())
+        return _ok(updated.to_dict(), request_id=rid)
 
 
 class ATMAdminWipeView(HomeAssistantView):
@@ -802,12 +823,13 @@ class ATMAdminWipeView(HomeAssistantView):
 
     @require_admin
     async def delete(self, request: web.Request) -> web.Response:
-        body = await _read_body(request)
+        rid = request["atm_rid"]
+        body = await _read_body(request, rid)
         if isinstance(body, web.Response):
             return body
 
         if body.get("confirm") != "WIPE":
-            return _err("invalid_request", 'confirm must be "WIPE".', 400)
+            return _err("invalid_request", 'confirm must be "WIPE".', 400, rid)
 
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
@@ -820,16 +842,17 @@ class ATMAdminWipeView(HomeAssistantView):
         data.token_counters.clear()
         await data.audit.async_wipe()
 
-        active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
         from .helpers import cancel_expiry_timer
         for _tid in list(data.expiry_timers):
             cancel_expiry_timer(data, _tid)
-        await data.store.async_wipe()
+        async with data.store.async_lock:
+            active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
+            await data.store.async_wipe()
 
         if data.async_on_token_archived:
             await asyncio.gather(*[data.async_on_token_archived(slug) for slug in active_slugs])
 
-        return web.Response(status=204)
+        return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
 
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
