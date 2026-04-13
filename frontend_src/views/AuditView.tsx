@@ -72,6 +72,7 @@ export function AuditView({ tokens }: Props) {
             <option value="denied">Denied</option>
             <option value="not_found">Not Found</option>
             <option value="rate_limited">Rate Limited</option>
+            <option value="not_implemented">Not Implemented</option>
           </select>
           <input
             className="input"

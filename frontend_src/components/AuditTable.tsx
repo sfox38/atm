@@ -18,6 +18,7 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   denied: "Denied",
   not_found: "Not Found",
   rate_limited: "Rate Limited",
+  not_implemented: "Not Implemented",
 };
 
 export function AuditTable({ entries, loading, page, pageSize, onPageChange }: Props) {

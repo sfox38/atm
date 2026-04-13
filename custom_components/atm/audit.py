@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-Outcome = Literal["allowed", "denied", "not_found", "rate_limited"]
+Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented"]
 
 _REDACTED = "[redacted]"
 
@@ -98,7 +98,7 @@ class AuditLog:
 
         if outcome == "allowed" and not settings.log_allowed:
             return
-        if outcome in ("denied", "not_found") and not settings.log_denied:
+        if outcome in ("denied", "not_found", "not_implemented") and not settings.log_denied:
             return
         if outcome == "rate_limited" and not settings.log_rate_limited:
             return

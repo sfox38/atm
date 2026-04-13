@@ -897,10 +897,10 @@ async def _dispatch_mcp(
 
     if msg_id is not None:
         _log(data, token, request_id=request_id, method=method or "unknown",
-             resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
-        return _jsonrpc_error(msg_id, -32601, "Method not found."), method or "unknown", "/api/atm/mcp", "denied"
+             resource="/api/atm/mcp", outcome="not_implemented", client_ip=client_ip)
+        return _jsonrpc_error(msg_id, -32601, "Method not found."), method or "unknown", "/api/atm/mcp", "not_implemented"
 
-    return None, method or "unknown", "/api/atm/mcp", "denied"
+    return None, method or "unknown", "/api/atm/mcp", "not_implemented"
 
 
 class ATMMcpSseView(HomeAssistantView):
