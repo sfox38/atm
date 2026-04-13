@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+from homeassistant.util.dt import utcnow as _utcnow
 
 from .audit import generate_request_id
 
@@ -24,6 +26,7 @@ from .const import (
 from .data import ATMData
 from .helpers import (
     FilteredStates as _FilteredStates,
+    ScrubbedState as _ScrubbedState,
     build_error_response as _error,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
@@ -91,6 +94,8 @@ def _count_service_targets(
     )
     return len(candidates | set(explicit_ids))
 
+_MAX_HISTORY_STATES_PER_ENTITY = 10_000
+_MAX_HISTORY_RANGE_DAYS = 7
 
 
 class ATMRootView(HomeAssistantView):
@@ -342,6 +347,13 @@ class ATMHistoryView(HomeAssistantView):
                  outcome="allowed", client_ip=client_ip)
             return _json_response({}, 200, request_id, rl_result)
 
+        # Clamp the query time range to prevent unbounded DB reads. The cap is applied
+        # to the DB query itself, not just the response, to bound recorder thread load.
+        effective_end = end_time if end_time is not None else _utcnow()
+        max_start = effective_end - timedelta(days=_MAX_HISTORY_RANGE_DAYS)
+        if start_time < max_start:
+            start_time = max_start
+
         try:
             import functools
 
@@ -374,15 +386,16 @@ class ATMHistoryView(HomeAssistantView):
                 pass
 
         output: dict[str, Any] = {}
+        effective_limit = limit_int if limit_int is not None else _MAX_HISTORY_STATES_PER_ENTITY
         for eid, states in history_result.items():
             state_dicts = [
                 _scrub_state_dict(s.as_dict() if hasattr(s, "as_dict") else s)
                 for s in states
             ]
-            if limit_int is not None and len(state_dicts) > limit_int:
-                output[eid] = {"states": state_dicts[:limit_int], "truncated": True}
+            if len(state_dicts) > effective_limit:
+                output[eid] = {"states": state_dicts[:effective_limit], "truncated": True}
             else:
-                output[eid] = state_dicts
+                output[eid] = {"states": state_dicts, "truncated": False}
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
@@ -552,13 +565,13 @@ class ATMTemplateView(HomeAssistantView):
 
             if token.pass_through:
                 permitted = {
-                    s.entity_id: s
+                    s.entity_id: _ScrubbedState(s)
                     for s in hass.states.async_all()
                     if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
                 }
             else:
                 permitted = {
-                    s.entity_id: s
+                    s.entity_id: _ScrubbedState(s)
                     for s in hass.states.async_all()
                     if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
                 }
@@ -682,7 +695,6 @@ class ATMServicesView(HomeAssistantView):
         all_services = hass.services.async_services()
 
         if token.pass_through:
-            from .const import BLOCKED_DOMAINS
             filtered = {
                 domain: svcs
                 for domain, svcs in all_services.items()

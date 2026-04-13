@@ -13,7 +13,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import MAX_REQUEST_BODY_BYTES, TOKEN_LENGTH, TOKEN_PREFIX
+from .const import MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
 from .policy_engine import parse_relative_time
 from .token_store import token_name_slug
 
@@ -292,6 +292,60 @@ async def terminate_token_connections(
             except asyncio.QueueEmpty:
                 pass
             queue.put_nowait(None)
+
+
+class ScrubbedState:
+    """Lightweight State wrapper that strips sensitive attributes for use in template sandboxes."""
+
+    def __init__(self, raw: Any) -> None:
+        self.entity_id = raw.entity_id
+        self.state = raw.state
+        self.attributes = {k: v for k, v in raw.attributes.items() if k not in SENSITIVE_ATTRIBUTES}
+        self.last_updated = getattr(raw, "last_updated", None)
+        self.last_changed = getattr(raw, "last_changed", None)
+        # Strip user_id from context to prevent HA user ID enumeration via templates.
+        ctx = getattr(raw, "context", None)
+        if ctx is not None:
+            self.context = type(
+                "Context",
+                (),
+                {
+                    "id": getattr(ctx, "id", None),
+                    "parent_id": getattr(ctx, "parent_id", None),
+                    "user_id": None,
+                },
+            )()
+        else:
+            self.context = None
+
+    @property
+    def domain(self) -> str:
+        return self.entity_id.split(".")[0]
+
+    @property
+    def object_id(self) -> str:
+        return self.entity_id.split(".", 1)[1] if "." in self.entity_id else self.entity_id
+
+    @property
+    def name(self) -> str:
+        friendly = self.attributes.get("friendly_name")
+        if friendly:
+            return str(friendly)
+        return self.object_id.replace("_", " ").title()
+
+    def as_dict(self) -> dict:
+        return {
+            "entity_id": self.entity_id,
+            "state": self.state,
+            "attributes": self.attributes,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "last_changed": self.last_changed.isoformat() if self.last_changed else None,
+            "context": {
+                "id": getattr(self.context, "id", None),
+                "parent_id": getattr(self.context, "parent_id", None),
+                "user_id": None,
+            } if self.context is not None else None,
+        }
 
 
 class FilteredStates:

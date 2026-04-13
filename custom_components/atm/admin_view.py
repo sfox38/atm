@@ -6,6 +6,7 @@ import asyncio
 import functools
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -93,6 +94,45 @@ async def _read_body(request: web.Request, request_id: str = "") -> dict | web.R
         return _err("invalid_request", "Request body must be a JSON object.", 400, request_id)
 
     return parsed
+
+
+_DOMAIN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_ENTITY_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_]+$")
+_MAX_NODE_ID_LEN = 255
+_INJECTION_CHARS = frozenset("<>\"'&;")
+
+
+def _validate_node_id(node_type: str, node_id: str, rid: str) -> web.Response | None:
+    """Return an error response if node_id fails length, injection, or format checks."""
+    if len(node_id) > _MAX_NODE_ID_LEN:
+        return _err("invalid_request", "Node ID is too long.", 400, rid)
+    if any(c in node_id for c in _INJECTION_CHARS):
+        return _err("invalid_request", "Node ID contains invalid characters.", 400, rid)
+    if node_type == "domains" and not _DOMAIN_RE.match(node_id):
+        return _err("invalid_request", "Invalid domain name.", 400, rid)
+    if node_type == "entities" and not _ENTITY_RE.match(node_id):
+        return _err("invalid_request", "Invalid entity ID format.", 400, rid)
+    return None
+
+
+def _validate_permission_tree_body(body: dict, rid: str) -> web.Response | None:
+    """Return an error response if any node ID or node state in the permission tree body is invalid."""
+    for section, node_type in (("domains", "domains"), ("devices", "devices"), ("entities", "entities")):
+        for key, value in body.get(section, {}).items():
+            err = _validate_node_id(node_type, key, rid)
+            if err:
+                return err
+            if isinstance(value, dict):
+                state = value.get("state", "GREY")
+                if state not in _VALID_NODE_STATES:
+                    return _err(
+                        "invalid_request",
+                        f"Invalid state {state!r} for {node_type[:-1]} {key!r}. "
+                        f"Valid states: {sorted(_VALID_NODE_STATES)}.",
+                        400,
+                        rid,
+                    )
+    return None
 
 
 async def _build_entity_tree(hass: Any) -> dict:
@@ -195,6 +235,8 @@ def _build_resolution_path(entity_id: str, token: Any, hass: Any) -> list[dict]:
     dr_reg = dr.async_get(hass)
 
     entry = er_reg.async_get(entity_id)
+    if entry:
+        entity_id = entry.entity_id
     domain = entity_id.split(".")[0]
 
     path: list[dict] = [{"level": "global", "state": "GREY"}]
@@ -458,6 +500,10 @@ class ATMAdminPermissionsView(HomeAssistantView):
         if isinstance(body, web.Response):
             return body
 
+        err = _validate_permission_tree_body(body, rid)
+        if err:
+            return err
+
         try:
             new_tree = PermissionTree.from_dict(body)
         except Exception:
@@ -518,6 +564,10 @@ async def _patch_permission_node(
     """Shared handler for PATCH on domain/device/entity permission nodes."""
     rid = request["atm_rid"]
 
+    err = _validate_node_id(node_type, node_id, rid)
+    if err:
+        return err
+
     data: ATMData = hass.data[DOMAIN]
 
     body = await _read_body(request, rid)
@@ -556,6 +606,8 @@ class ATMAdminResolveView(HomeAssistantView):
     @require_admin
     async def get(self, request: web.Request, token_id: str, entity_id: str) -> web.Response:
         rid = request["atm_rid"]
+        if not _ENTITY_RE.match(entity_id):
+            return _err("invalid_request", "Invalid entity ID format.", 400, rid)
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
         token = data.store.get_token_by_id(token_id)
@@ -858,6 +910,14 @@ class ATMAdminWipeView(HomeAssistantView):
         async with data.store.async_lock:
             active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
             await data.store.async_wipe()
+
+        # Clear mcp_sessions after storage wipe so any sessions created during the
+        # async yields above (audit wipe, lock acquisition) are also removed.
+        data.mcp_sessions.clear()
+
+        if not data.routes_registered and data.async_register_routes:
+            await data.async_register_routes()
+            data.routes_registered = True
 
         # Sensor removal runs after the lock is released. A concurrent token creation
         # with the same slug as a just-wiped token could have its sensors removed here.

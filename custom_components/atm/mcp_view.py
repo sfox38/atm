@@ -33,6 +33,7 @@ from .const import (
 from .data import ATMData
 from .helpers import (
     FilteredStates as _FilteredStates,
+    ScrubbedState as _ScrubbedState,
     archive_expired_token,
     build_error_response as _error,
     fire_rate_limit_events as _fire_rate_limit_events,
@@ -489,13 +490,13 @@ async def _tool_render_template(
 
         if token.pass_through:
             permitted = {
-                s.entity_id: s
+                s.entity_id: _ScrubbedState(s)
                 for s in hass.states.async_all()
                 if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
             }
         else:
             permitted = {
-                s.entity_id: s
+                s.entity_id: _ScrubbedState(s)
                 for s in hass.states.async_all()
                 if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
             }
@@ -708,7 +709,7 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
             f"It has unrestricted access to all {count} accessible Home Assistant entities and services."
         )
         lines.append("")
-        lines.append("The ATM domain (sensor.atm_*) is always blocked regardless of token type.")
+        lines.append("The atm domain is always blocked regardless of token type.")
     else:
         states = hass.states.async_all()
         accessible: list[tuple[str, str, str | None]] = []
@@ -1022,7 +1023,7 @@ class ATMMcpSseView(HomeAssistantView):
                     await response.write(
                         f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
                     )
-            except (ConnectionResetError, asyncio.CancelledError):
+            except ConnectionResetError:
                 pass
         finally:
             _cleanup()
@@ -1116,7 +1117,10 @@ class ATMMcpMessagesView(HomeAssistantView):
 
         if body.get("jsonrpc") != "2.0":
             if body.get("id") is not None:
-                await queue.put(_jsonrpc_error(body.get("id"), -32600, "Invalid Request."))
+                try:
+                    queue.put_nowait(_jsonrpc_error(body.get("id"), -32600, "Invalid Request."))
+                except asyncio.QueueFull:
+                    return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
             return web.Response(
                 status=202,
                 headers={"X-ATM-Request-ID": request_id},

@@ -96,7 +96,7 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 |---|---|
 | `get_state` - current state of one entity | none |
 | `get_states` - all accessible entity states | none |
-| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`) | none |
+| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`, capped at 7 days) | none |
 | `get_statistics` - long-term statistics for numeric entities | none |
 | `call_service` - call a HA service | none |
 | `render_template` - render a Jinja2 template | `allow_template_render` |
@@ -252,6 +252,7 @@ When the kill switch is enabled at startup, ATM registers no proxy or MCP routes
 
 - Request bodies exceeding 1 MB are rejected with 413 before any processing.
 - SSE connections are limited to 5 per token. A sixth connection is rejected with 429.
+- History queries are capped at a 7-day time range. Requests spanning more than 7 days are silently clamped to the most recent 7 days before hitting the recorder database.
 - Every response includes an `X-ATM-Request-ID` header with a UUID that matches the corresponding audit log entry.
 
 ---
@@ -351,7 +352,7 @@ DELETE     /api/atm/admin/wipe                                Wipe all tokens an
 GET        /api/atm/states                                    All accessible entity states
 GET        /api/atm/states/{entity_id}                        One entity state
 POST       /api/atm/services/{domain}/{service}               Call a service
-GET        /api/atm/history/period/{timestamp}                State history
+GET        /api/atm/history/period/{timestamp}                State history (max 7-day range)
 GET        /api/atm/statistics                                Long-term statistics
 POST       /api/atm/template                                  Render a Jinja2 template
 GET        /api/atm/config                                    HA configuration

@@ -111,7 +111,6 @@ class TokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "token_hash": self.token_hash,
             "created_at": self.created_at.isoformat(),
             "created_by": self.created_by,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
@@ -126,6 +125,11 @@ class TokenRecord:
             "allow_restart": self.allow_restart,
             "permissions": self.permissions.to_dict(),
         }
+
+    def to_storage_dict(self) -> dict:
+        d = self.to_dict()
+        d["token_hash"] = self.token_hash
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> TokenRecord:
@@ -176,7 +180,6 @@ class ArchivedTokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "token_hash": self.token_hash,
             "created_at": self.created_at.isoformat(),
             "created_by": self.created_by,
             "revoked_at": self.revoked_at.isoformat(),
@@ -185,6 +188,11 @@ class ArchivedTokenRecord:
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "pass_through": self.pass_through,
         }
+
+    def to_storage_dict(self) -> dict:
+        d = self.to_dict()
+        d["token_hash"] = self.token_hash
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> ArchivedTokenRecord:
@@ -293,8 +301,8 @@ class TokenStore:
         """Persist the current in-memory state to HA storage."""
         await self._store.async_save({
             "version": STORAGE_VERSION,
-            "tokens": [t.to_dict() for t in self._tokens.values()],
-            "archived_tokens": [a.to_dict() for a in self._archived.values()],
+            "tokens": [t.to_storage_dict() for t in self._tokens.values()],
+            "archived_tokens": [a.to_storage_dict() for a in self._archived.values()],
             "settings": self._settings.to_dict(),
         })
 
