@@ -36,12 +36,13 @@ interface Props {
   error: string | null;
   onRefresh: () => void;
   onOpenDetail: (id: string) => void;
+  showArchived: boolean;
+  onShowArchivedChange: (v: boolean) => void;
 }
 
-export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail }: Props) {
+export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail, showArchived, onShowArchivedChange }: Props) {
   const [filter, setFilter] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
   const [archived, setArchived] = useState<ArchivedTokenRecord[] | null>(null);
   const [archivedLoading, setArchivedLoading] = useState(false);
 
@@ -177,7 +178,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail 
       <div style={{ marginTop: 8 }}>
         <button
           className="btn btn-text"
-          onClick={() => setShowArchived((x) => !x)}
+          onClick={() => onShowArchivedChange(!showArchived)}
           style={{ textTransform: "none", letterSpacing: 0 }}
         >
           {showArchived ? "Hide archived" : "Show archived"}

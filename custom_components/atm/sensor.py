@@ -70,9 +70,20 @@ class ATMTokenSensor(SensorEntity):
 
         if sensor_type in self._COUNT_TYPES:
             self._attr_state_class = SensorStateClass.MEASUREMENT
-        elif sensor_type == "expires_in":
-            self._attr_state_class = SensorStateClass.MEASUREMENT
-            self._attr_native_unit_of_measurement = UnitOfTime.DAYS
+
+    @property
+    def state_class(self):
+        if self._sensor_type in self._COUNT_TYPES:
+            return SensorStateClass.MEASUREMENT
+        if self._sensor_type == "expires_in" and self._token.expires_at is not None:
+            return SensorStateClass.MEASUREMENT
+        return None
+
+    @property
+    def native_unit_of_measurement(self):
+        if self._sensor_type == "expires_in" and self._token.expires_at is not None:
+            return UnitOfTime.DAYS
+        return None
 
     @property
     def token_id(self) -> str:
@@ -115,7 +126,7 @@ class ATMTokenSensor(SensorEntity):
 
         if sensor_type == "expires_in":
             if token.expires_at is None:
-                return None
+                return "No expiry"
             delta = token.expires_at - utcnow()
             return max(0, math.ceil(delta.total_seconds() / 86400))
 

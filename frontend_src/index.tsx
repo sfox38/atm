@@ -609,6 +609,7 @@ function ATMApp({ hass }: { hass: unknown }) {
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(true);
   const [tokensError, setTokensError] = useState<string | null>(null);
+  const [showArchivedTokens, setShowArchivedTokens] = useState(false);
 
   const refreshTokens = useCallback(async () => {
     setLoadingTokens(true);
@@ -645,7 +646,11 @@ function ATMApp({ hass }: { hass: unknown }) {
           <button
             key={t}
             className={`atm-tab${tab === t ? " active" : ""}`}
-            onClick={() => { setTab(t); if (t !== "tokens") setView({ name: "list" }); }}
+            onClick={() => {
+              setTab(t);
+              if (t !== "tokens") setView({ name: "list" });
+              if (t === "tokens" || t === "audit") refreshTokens();
+            }}
           >
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -659,6 +664,8 @@ function ATMApp({ hass }: { hass: unknown }) {
             error={tokensError}
             onRefresh={refreshTokens}
             onOpenDetail={openDetail}
+            showArchived={showArchivedTokens}
+            onShowArchivedChange={setShowArchivedTokens}
           />
         )}
         {tab === "tokens" && view.name === "detail" && (
