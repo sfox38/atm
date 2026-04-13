@@ -29,6 +29,7 @@ export interface TokenRecord {
   allow_config_read: boolean;
   allow_template_render: boolean;
   allow_restart: boolean;
+  allow_service_response: boolean;
   permissions: PermissionTree;
 }
 
@@ -107,6 +108,7 @@ export interface ResolveResult {
   entity_id: string;
   resolution_path: ResolutionStep[];
   effective: Permission;
+  effective_hint: string | null;
 }
 
 export interface TokenStats {
@@ -150,6 +152,7 @@ export interface PatchTokenBody {
   allow_config_read?: boolean;
   allow_template_render?: boolean;
   allow_restart?: boolean;
+  allow_service_response?: boolean;
 }
 
 export interface PermissionPatchBody {

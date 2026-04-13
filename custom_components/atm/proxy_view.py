@@ -265,6 +265,18 @@ class ATMServiceView(HomeAssistantView):
             "X-ATM-Entities-Affected": str(affected_count),
         }
 
+        use_return_response = False
+        if token.allow_service_response:
+            try:
+                from homeassistant.core import SupportsResponse as _SR
+                handler = hass.services.async_services().get(domain, {}).get(service)
+                use_return_response = (
+                    handler is not None and
+                    getattr(handler, "supports_response", None) not in (None, _SR.NONE)
+                )
+            except Exception:
+                pass
+
         try:
             async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
                 svc_response = await hass.services.async_call(
@@ -272,7 +284,7 @@ class ATMServiceView(HomeAssistantView):
                     service,
                     call_data,
                     blocking=True,
-                    return_response=False,
+                    return_response=use_return_response,
                 )
         except asyncio.TimeoutError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
