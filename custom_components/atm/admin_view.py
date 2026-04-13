@@ -479,6 +479,7 @@ class ATMAdminPermissionDomainView(HomeAssistantView):
     name = "api:atm:admin:permission_domain"
     requires_auth = True
 
+    @require_admin
     async def patch(self, request: web.Request, token_id: str, node_id: str) -> web.Response:
         return await _patch_permission_node(request, self.hass, token_id, "domains", node_id)
 
@@ -490,6 +491,7 @@ class ATMAdminPermissionDeviceView(HomeAssistantView):
     name = "api:atm:admin:permission_device"
     requires_auth = True
 
+    @require_admin
     async def patch(self, request: web.Request, token_id: str, node_id: str) -> web.Response:
         return await _patch_permission_node(request, self.hass, token_id, "devices", node_id)
 
@@ -501,6 +503,7 @@ class ATMAdminPermissionEntityView(HomeAssistantView):
     name = "api:atm:admin:permission_entity"
     requires_auth = True
 
+    @require_admin
     async def patch(self, request: web.Request, token_id: str, node_id: str) -> web.Response:
         return await _patch_permission_node(request, self.hass, token_id, "entities", node_id)
 
@@ -513,12 +516,7 @@ async def _patch_permission_node(
     node_id: str,
 ) -> web.Response:
     """Shared handler for PATCH on domain/device/entity permission nodes."""
-    rid = request.get("atm_rid") or str(uuid.uuid4())
-    user = request.get(KEY_HASS_USER)
-    if not user or not user.is_admin:
-        _LOGGER.debug("Admin %s %s unauthorized rid=%s", request.method, request.path, rid)
-        return _err("forbidden", "Admin access required.", 403, rid)
-    _LOGGER.debug("Admin %s %s rid=%s user=%s", request.method, request.path, rid, user.id)
+    rid = request["atm_rid"]
 
     data: ATMData = hass.data[DOMAIN]
 
@@ -672,6 +670,8 @@ class ATMAdminTokenStatsView(HomeAssistantView):
 
         last_used = token.last_used_at.isoformat() if token.last_used_at else None
 
+        status = "expired" if token.is_expired() else "active"
+
         return _ok({
             "token_id": token_id,
             "token_name": token.name,
@@ -679,7 +679,7 @@ class ATMAdminTokenStatsView(HomeAssistantView):
             "denied_count": counters["denied_count"],
             "rate_limit_hits": counters["rate_limit_hits"],
             "last_used_at": last_used,
-            "status": "active",
+            "status": status,
         }, request_id=rid)
 
 
@@ -802,9 +802,8 @@ class ATMAdminSettingsView(HomeAssistantView):
             if patchable["audit_log_maxlen"] not in _VALID_LOG_MAXLENS:
                 return _err("invalid_request", f"audit_log_maxlen must be one of: {sorted(_VALID_LOG_MAXLENS)}.", 400, rid)
 
-        old_kill_switch = data.store.get_settings().kill_switch
-
         async with data.store.async_lock:
+            old_kill_switch = data.store.get_settings().kill_switch
             updated = await data.store.async_patch_settings(**patchable)
 
         if "audit_log_maxlen" in patchable:
@@ -860,6 +859,10 @@ class ATMAdminWipeView(HomeAssistantView):
             active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
             await data.store.async_wipe()
 
+        # Sensor removal runs after the lock is released. A concurrent token creation
+        # with the same slug as a just-wiped token could have its sensors removed here.
+        # This race is accepted: wipe is a destructive admin operation and should not
+        # be run concurrently with token creation.
         if data.async_on_token_archived:
             await asyncio.gather(
                 *[data.async_on_token_archived(slug) for slug in active_slugs],

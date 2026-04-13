@@ -282,7 +282,16 @@ async def terminate_token_connections(
     """
     queues = sse_connections.pop(token_id, set())
     for queue in queues:
-        await queue.put(None)
+        try:
+            queue.put_nowait(None)
+        except asyncio.QueueFull:
+            # Queue is at capacity (slow/disconnected client). Evict one message to
+            # make room for the sentinel so the SSE loop exits without blocking.
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            queue.put_nowait(None)
 
 
 class FilteredStates:

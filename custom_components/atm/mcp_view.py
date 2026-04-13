@@ -673,6 +673,29 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
     }
 
 
+def _get_effective_hint(token: TokenRecord, entity_id: str, hass: Any) -> str | None:
+    """Return the most specific hint for an entity, checking entity then device then domain nodes."""
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    permissions = token.permissions
+
+    entity_node = permissions.entities.get(entity_id)
+    if entity_node and entity_node.hint:
+        return entity_node.hint
+
+    if entry and entry.device_id:
+        device_node = permissions.devices.get(entry.device_id)
+        if device_node and device_node.hint:
+            return device_node.hint
+
+    domain = entity_id.split(".")[0]
+    domain_node = permissions.domains.get(domain)
+    if domain_node and domain_node.hint:
+        return domain_node.hint
+
+    return None
+
+
 def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     """Build the plain-text context document listing accessible entities and capabilities."""
     lines: list[str] = []
@@ -692,13 +715,9 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm == Permission.WRITE:
-                node = token.permissions.entities.get(state.entity_id)
-                hint = node.hint if node else None
-                accessible.append((state.entity_id, "READ/WRITE", hint))
+                accessible.append((state.entity_id, "READ/WRITE", _get_effective_hint(token, state.entity_id, hass)))
             elif perm == Permission.READ:
-                node = token.permissions.entities.get(state.entity_id)
-                hint = node.hint if node else None
-                accessible.append((state.entity_id, "READ", hint))
+                accessible.append((state.entity_id, "READ", _get_effective_hint(token, state.entity_id, hass)))
 
         accessible.sort(key=lambda x: x[0])
         lines.append("You have access to the following Home Assistant entities:")
@@ -758,10 +777,10 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             entry = registry.async_get(state.entity_id)
             area_id = _resolve_area_id(entry, dev_registry)
             perm_str = "READ/WRITE" if perm == Permission.WRITE else "READ"
-            node = token.permissions.entities.get(state.entity_id)
             e: dict = {"entity_id": state.entity_id, "permission": perm_str, "area_id": area_id}
-            if node and node.hint:
-                e["hint"] = node.hint
+            hint = _get_effective_hint(token, state.entity_id, hass)
+            if hint:
+                e["hint"] = hint
             entities.append(e)
 
     entities.sort(key=lambda e: e["entity_id"])
@@ -1030,7 +1049,12 @@ class ATMMcpSseView(HomeAssistantView):
         body = body_result
 
         if body.get("jsonrpc") != "2.0":
-            return _error("invalid_request", "Invalid JSON-RPC request.", 400, request_id)
+            return web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(body.get("id"), -32600, "Invalid Request.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         msg_id = body.get("id")
         method = body.get("method", "")
@@ -1107,7 +1131,10 @@ class ATMMcpMessagesView(HomeAssistantView):
         )
 
         if response_msg is not None:
-            await queue.put(response_msg)
+            try:
+                queue.put_nowait(response_msg)
+            except asyncio.QueueFull:
+                return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
 
         return web.Response(
             status=202,

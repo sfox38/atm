@@ -242,8 +242,8 @@ class GlobalSettings:
             log_entity_names=bool(data.get("log_entity_names", True)),
             log_client_ip=bool(data.get("log_client_ip", True)),
             notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
-            audit_flush_interval=data.get("audit_flush_interval", 15),
-            audit_log_maxlen=data.get("audit_log_maxlen", 10000),
+            audit_flush_interval=int(data.get("audit_flush_interval", 15)),
+            audit_log_maxlen=int(data.get("audit_log_maxlen", 10000)),
         )
 
 
