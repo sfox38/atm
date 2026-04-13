@@ -777,8 +777,8 @@ async def _dispatch_mcp(
     hass: Any,
     data: ATMData,
     client_ip: str,
-    protocol_version: str = _MCP_VERSION_SSE,
     base_url: str,
+    protocol_version: str = _MCP_VERSION_SSE,
 ) -> tuple[dict | None, str, str, str]:
     """Dispatch one MCP method call.
 
