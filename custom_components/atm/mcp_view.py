@@ -500,7 +500,7 @@ async def _tool_render_template(
 
     template_str = args.get("template", "")
     if not template_str:
-        return _tool_error("Missing required argument: template"), "denied", "render_template"
+        return _tool_error("Missing required argument: template"), "invalid_request", "render_template"
 
     try:
         from homeassistant.helpers import template as template_helper
@@ -547,7 +547,7 @@ async def _tool_render_template(
             **template_blocklist_vars(),
         })
     except Exception:
-        return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
+        return _tool_error("Template rendering failed. Check your template syntax."), "invalid_request", "render_template"
 
     return _tool_success(str(rendered)), "allowed", "render_template"
 

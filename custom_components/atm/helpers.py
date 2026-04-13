@@ -179,9 +179,6 @@ async def get_authenticated_token(
     if token is None:
         return _401
 
-    if token.revoked:
-        return _401
-
     if token.is_expired():
         await archive_expired_token(hass, data, token)
         return _401

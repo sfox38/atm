@@ -15,7 +15,6 @@ from homeassistant.util.dt import utcnow as _utcnow
 
 from .audit import generate_request_id
 
-_LOGGER = logging.getLogger(__name__)
 from .const import (
     BLOCKED_DOMAINS,
     DOMAIN,
@@ -49,6 +48,8 @@ from .policy_engine import (
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _json_response(
@@ -657,7 +658,7 @@ class ATMTemplateView(HomeAssistantView):
             })
         except Exception:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="invalid_request", client_ip=client_ip)
             return _error(
                 "invalid_request",
                 "Template rendering failed.",

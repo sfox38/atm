@@ -30,6 +30,8 @@ SENSOR_PUSH_INTERVAL = datetime.timedelta(hours=1)
 AUDIT_LOG_MAXLEN = 10000
 AUDIT_STORAGE_KEY = "atm_audit"
 AUDIT_STORAGE_VERSION = 1
+# audit_flush_interval is stored and exposed in minutes (not seconds).
+# Valid values: 0 (disable periodic flush), 5, 10, 15, 30, 60.
 
 SENSITIVE_ATTRIBUTES = frozenset({
     "entity_picture",

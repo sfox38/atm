@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented"]
+Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"]
 
 _REDACTED = "[redacted]"
 
@@ -118,7 +118,7 @@ class AuditLog:
             pass_through=pass_through,
         ))
 
-    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented"})
+    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"})
 
     def query(
         self,

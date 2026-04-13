@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from homeassistant.core import HomeAssistant
-
-_LOGGER = logging.getLogger(__name__)
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import parse_datetime, utcnow
 
@@ -26,6 +24,7 @@ from .const import (
     TOKEN_PREFIX,
 )
 
+_LOGGER = logging.getLogger(__name__)
 
 _VALID_NODE_STATES = frozenset({"GREY", "YELLOW", "GREEN", "RED"})
 
