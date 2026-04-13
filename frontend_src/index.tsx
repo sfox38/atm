@@ -645,7 +645,11 @@ function ATMApp({ hass }: { hass: unknown }) {
           <button
             key={t}
             className={`atm-tab${tab === t ? " active" : ""}`}
-            onClick={() => { setTab(t); if (t !== "tokens") setView({ name: "list" }); }}
+            onClick={() => {
+              setTab(t);
+              if (t !== "tokens") setView({ name: "list" });
+              if (t === "tokens" || t === "audit") refreshTokens();
+            }}
           >
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
