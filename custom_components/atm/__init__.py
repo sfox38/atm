@@ -64,8 +64,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             view.hass = hass
             hass.http.register_view(view)
 
+    data.async_register_routes = _register_routes
     if not settings.kill_switch:
         await _register_routes()
+        data.routes_registered = True
 
     from .sensor import async_create_token_sensors, async_remove_token_sensors
 

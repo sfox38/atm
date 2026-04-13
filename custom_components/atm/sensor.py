@@ -103,7 +103,7 @@ class ATMTokenSensor(SensorEntity):
 
         if sensor_type == "last_access":
             if token.last_used_at is None:
-                return "never"
+                return None
             return token.last_used_at.isoformat()
 
         if sensor_type == "expires_in":

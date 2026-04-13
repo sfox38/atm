@@ -18,13 +18,12 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
-
-_LOGGER = logging.getLogger(__name__)
 from .const import (
     ATM_VERSION,
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
+    HIGH_RISK_DOMAINS,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     PROXY_TIMEOUT_SECONDS,
     SSE_HEARTBEAT_INTERVAL,
@@ -55,6 +54,8 @@ from .policy_engine import (
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 _MCP_VERSION = "2024-11-05"
 
@@ -417,6 +418,12 @@ async def _tool_call_service(
     if not permitted_entities:
         return _tool_error("Forbidden."), "denied", resource
 
+    if domain in HIGH_RISK_DOMAINS:
+        _LOGGER.info(
+            "High-risk service call %s/%s by token %s",
+            domain, service, token.name,
+        )
+
     call_data = dict(service_data)
     call_data["entity_id"] = permitted_entities
 
@@ -541,6 +548,8 @@ async def _tool_render_template(
             "floor_id": lambda *a, **kw: None,
             "floor_name": lambda *a, **kw: None,
             "closest": lambda *a, **kw: None,
+            "is_device_attr": lambda *a, **kw: False,
+            "area_id": lambda *a, **kw: None,
         })
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
@@ -943,7 +952,7 @@ class ATMMcpSseView(HomeAssistantView):
              outcome="allowed", client_ip=client_ip)
 
         session_id = str(uuid.uuid4())
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
         data.mcp_sessions[session_id] = (queue, token.id)
         if token.id not in data.sse_connections:
@@ -958,6 +967,14 @@ class ATMMcpSseView(HomeAssistantView):
                 if not conns:
                     data.sse_connections.pop(token.id, None)
 
+        # Re-check token after queue insertion to close the TOCTOU window where
+        # a DELETE/archive could have run between auth check and queue add.
+        # Must happen BEFORE response.prepare() - once headers are sent the
+        # connection is bound to SSE and returning a web.Response is invalid.
+        if data.store.get_token_by_id(token.id) is None:
+            _cleanup()
+            return _error("unauthorized", "Unauthorized.", 401, request_id)
+
         response = web.StreamResponse()
         response.headers["Content-Type"] = "text/event-stream"
         response.headers["Cache-Control"] = "no-cache"
@@ -966,12 +983,6 @@ class ATMMcpSseView(HomeAssistantView):
 
         try:
             await response.prepare(request)
-
-            # Re-check token after queue insertion to close the TOCTOU window where
-            # a DELETE/archive could have run between auth check and queue add.
-            if data.store.get_token_by_id(token.id) is None:
-                _cleanup()
-                return _error("unauthorized", "Unauthorized.", 401, request_id)
 
             base_url = str(request.url.origin())
             messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"

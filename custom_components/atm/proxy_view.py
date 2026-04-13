@@ -18,6 +18,7 @@ from .const import (
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
+    HIGH_RISK_DOMAINS,
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
@@ -184,7 +185,7 @@ class ATMStateView(HomeAssistantView):
                  outcome="not_found", client_ip=client_ip)
             return _error("not_found", "Entity not found.", 404, request_id)
 
-        _log(data, token, request_id=request_id, method="GET", resource=entity_id,
+        _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
         return _json_response(scrub_sensitive_attributes(state), 200, request_id, rl_result)
 
@@ -243,6 +244,12 @@ class ATMServiceView(HomeAssistantView):
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
+
+        if domain in HIGH_RISK_DOMAINS:
+            _LOGGER.info(
+                "High-risk service call %s/%s by token %s rid=%s",
+                domain, service, token.name, request_id,
+            )
 
         affected_count = len(permitted_entities)
         call_data = dict(service_data)
@@ -604,6 +611,8 @@ class ATMTemplateView(HomeAssistantView):
                 "floor_id": lambda *a, **kw: None,
                 "floor_name": lambda *a, **kw: None,
                 "closest": lambda *a, **kw: None,
+                "is_device_attr": lambda *a, **kw: False,
+                "area_id": lambda *a, **kw: None,
             })
         except Exception:
             return _error(

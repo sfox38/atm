@@ -44,3 +44,7 @@ class ATMData:
     # Callbacks wired by __init__.py to decouple sensor lifecycle from views.
     async_on_token_created: Callable | None = None
     async_on_token_archived: Callable | None = None
+    # Set to True once proxy/MCP routes have been registered; prevents duplicate registration.
+    routes_registered: bool = False
+    # Called by the admin settings PATCH when the kill switch is deactivated.
+    async_register_routes: Callable | None = None

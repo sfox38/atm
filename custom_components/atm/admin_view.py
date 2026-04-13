@@ -518,6 +518,7 @@ async def _patch_permission_node(
     if not user or not user.is_admin:
         _LOGGER.debug("Admin %s %s unauthorized rid=%s", request.method, request.path, rid)
         return _err("forbidden", "Admin access required.", 403, rid)
+    _LOGGER.debug("Admin %s %s rid=%s user=%s", request.method, request.path, rid, user.id)
 
     data: ATMData = hass.data[DOMAIN]
 
@@ -532,6 +533,8 @@ async def _patch_permission_node(
     hint = body.get("hint")
     if hint is not None and not isinstance(hint, str):
         return _err("invalid_request", "hint must be a string.", 400, rid)
+    if hint is not None and len(hint) > 200:
+        return _err("invalid_request", "hint must be 200 characters or fewer.", 400, rid)
 
     async with data.store.async_lock:
         token = data.store.get_token_by_id(token_id)
@@ -771,14 +774,17 @@ class ATMAdminSettingsView(HomeAssistantView):
         _VALID_FLUSH_INTERVALS = frozenset({0, 5, 10, 15, 30, 60})
         _VALID_LOG_MAXLENS = frozenset({100, 1000, 5000, 10000})
 
+        _BOOL_SETTINGS = frozenset({
+            "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
+            "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
+        })
         patchable = {
             k: v for k, v in body.items()
-            if k in (
-                "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
-                "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
-                "audit_flush_interval", "audit_log_maxlen",
-            )
+            if k in _BOOL_SETTINGS | {"audit_flush_interval", "audit_log_maxlen"}
         }
+        for key in _BOOL_SETTINGS:
+            if key in patchable:
+                patchable[key] = bool(patchable[key])
 
         if "audit_flush_interval" in patchable:
             try:
@@ -810,6 +816,11 @@ class ATMAdminSettingsView(HomeAssistantView):
                 # Kill switch just activated: terminate all open SSE connections.
                 for token_id in list(data.sse_connections.keys()):
                     await terminate_token_connections(token_id, data.sse_connections)
+            elif old_kill_switch and not new_kill_switch:
+                # Kill switch just deactivated: re-register routes if not already registered.
+                if not data.routes_registered and data.async_register_routes:
+                    await data.async_register_routes()
+                    data.routes_registered = True
 
         return _ok(updated.to_dict(), request_id=rid)
 
@@ -850,7 +861,10 @@ class ATMAdminWipeView(HomeAssistantView):
             await data.store.async_wipe()
 
         if data.async_on_token_archived:
-            await asyncio.gather(*[data.async_on_token_archived(slug) for slug in active_slugs])
+            await asyncio.gather(
+                *[data.async_on_token_archived(slug) for slug in active_slugs],
+                return_exceptions=True,
+            )
 
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 

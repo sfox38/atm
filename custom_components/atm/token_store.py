@@ -234,14 +234,14 @@ class GlobalSettings:
     @classmethod
     def from_dict(cls, data: dict) -> GlobalSettings:
         return cls(
-            kill_switch=data.get("kill_switch", False),
-            disable_all_logging=data.get("disable_all_logging", False),
-            log_allowed=data.get("log_allowed", True),
-            log_denied=data.get("log_denied", True),
-            log_rate_limited=data.get("log_rate_limited", True),
-            log_entity_names=data.get("log_entity_names", True),
-            log_client_ip=data.get("log_client_ip", True),
-            notify_on_rate_limit=data.get("notify_on_rate_limit", False),
+            kill_switch=bool(data.get("kill_switch", False)),
+            disable_all_logging=bool(data.get("disable_all_logging", False)),
+            log_allowed=bool(data.get("log_allowed", True)),
+            log_denied=bool(data.get("log_denied", True)),
+            log_rate_limited=bool(data.get("log_rate_limited", True)),
+            log_entity_names=bool(data.get("log_entity_names", True)),
+            log_client_ip=bool(data.get("log_client_ip", True)),
+            notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
             audit_flush_interval=data.get("audit_flush_interval", 15),
             audit_log_maxlen=data.get("audit_log_maxlen", 10000),
         )
