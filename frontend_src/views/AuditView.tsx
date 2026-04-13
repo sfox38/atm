@@ -15,6 +15,7 @@ export function AuditView({ tokens }: Props) {
   const [page, setPage] = useState(0);
   const [tokenFilter, setTokenFilter] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<Outcome | "">("");
+  const [methodFilter, setMethodFilter] = useState("");
   const [ipFilter, setIpFilter] = useState("");
   const [resourceFilter, setResourceFilter] = useState("");
 
@@ -36,6 +37,7 @@ export function AuditView({ tokens }: Props) {
   const filtered = entries.filter((e) => {
     if (tokenFilter && e.token_id !== tokenFilter) return false;
     if (outcomeFilter && e.outcome !== outcomeFilter) return false;
+    if (methodFilter && !e.method.toLowerCase().includes(methodFilter.toLowerCase())) return false;
     if (ipFilter && !e.client_ip.includes(ipFilter)) return false;
     if (resourceFilter && !e.resource.toLowerCase().includes(resourceFilter.toLowerCase())) return false;
     return true;
@@ -74,6 +76,12 @@ export function AuditView({ tokens }: Props) {
             <option value="rate_limited">Rate Limited</option>
             <option value="not_implemented">Not Implemented</option>
           </select>
+          <input
+            className="input"
+            placeholder="Filter by method..."
+            value={methodFilter}
+            onChange={(e) => { setMethodFilter(e.target.value); setPage(0); }}
+          />
           <input
             className="input"
             placeholder="Filter by resource..."
