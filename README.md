@@ -14,7 +14,7 @@ ATM exposes a REST proxy and an MCP endpoint, both running inside Home Assistant
 |---|---|---|
 | Entity filtering | Binary expose/hide, same for all clients | Four permission states, per token |
 | Per-client control | No - all clients see the same exposed entities | Yes - each token has independent permissions |
-| Read-only access | No | Yes - 🟡 YELLOW state allows reads, blocks writes |
+| Read-only access | No | Yes - YELLOW state allows reads, blocks writes |
 | Audit trail | None | Every request logged with outcome and entity |
 | Rate limiting | None | Per-token, configurable |
 | Expiry | None | Optional, auto-archived on expiry |
@@ -53,7 +53,8 @@ If you are connecting Claude Code, Cursor, ChatGPT, or any other AI tool to your
 
 After installation, go to **Settings > Devices and services > Add integration** and search for "Advanced Token Management". Click through the single-step config flow. Only one ATM instance can be configured at a time.
 
-Once installed, the ATM panel appears in your Home Assistant sidebar.
+> [!NOTE]
+> Once installed, use the **ATM** panel in your Home Assistant sidebar to manage your tokens.
 
 ---
 
@@ -95,7 +96,7 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 |---|---|
 | `get_state` - current state of one entity | none |
 | `get_states` - all accessible entity states | none |
-| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`) | none |
+| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`, capped at 7 days) | none |
 | `get_statistics` - long-term statistics for numeric entities | none |
 | `call_service` - call a HA service | none |
 | `render_template` - render a Jinja2 template | `allow_template_render` |
@@ -111,7 +112,8 @@ Claude can only see and act on entities within the token's permission scope.
 
 If you use a third-party MCP server for Home Assistant such as ha-mcp, you can point it at ATM using a pass-through token instead of your LLAT. You get the same full entity access but with rate limiting, audit logging, revocation, and sensitive attribute scrubbing applied automatically.
 
-See [EXTERNAL_MCP_SERVERS.md](EXTERNAL_MCP_SERVERS.md) for setup instructions for specific third-party servers.
+> [!NOTE]
+> See [EXTERNAL_MCP_SERVERS.md](EXTERNAL_MCP_SERVERS.md) for setup instructions for specific third-party servers.
 
 ---
 
@@ -250,6 +252,7 @@ When the kill switch is enabled at startup, ATM registers no proxy or MCP routes
 
 - Request bodies exceeding 1 MB are rejected with 413 before any processing.
 - SSE connections are limited to 5 per token. A sixth connection is rejected with 429.
+- History queries are capped at a 7-day time range. Requests spanning more than 7 days are silently clamped to the most recent 7 days before hitting the recorder database. The actual queried range is always returned in `X-ATM-History-Start` and `X-ATM-History-End` response headers. Passing a `start_time` after `end_time` returns 400.
 - Every response includes an `X-ATM-Request-ID` header with a UUID that matches the corresponding audit log entry.
 
 ---
@@ -276,25 +279,33 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 | Setting | Default | Description |
 |---|---|---|
 | Kill switch | Off | When on, proxy and MCP routes are unregistered entirely |
-| Disable all logging | Off | Suppresses all audit log writes |
+| Disable all logging | Off | Suppresses all auditing |
 | Log allowed requests | On | Record successful requests |
 | Log denied requests | On | Record blocked requests |
 | Log rate-limited requests | On | Record rate-limited requests |
 | Log entity names | On | Include entity IDs in audit entries |
 | Log client IP | On | Include caller IP in audit entries |
 | Notify on rate limit | Off | Create a HA notification when a token is rate limited |
+| Audit log flush interval | 15 min | How often to snapshot the in-memory log to disk. Set to "Never" to disable persistence entirely. |
+| Maximum log entries | 10,000 | Capacity of the in-memory buffer and the on-disk snapshot. Reducing this trims the oldest entries immediately. |
 
 ---
 
 ## Audit Log
 
-ATM keeps an in-memory circular buffer of the last 10,000 requests. The log is queryable from the ATM panel or via the admin API.
+ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings.
 
 Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, or `rate_limited`), and client IP.
 
 `not_found` is recorded when an entity is genuinely absent from both HA state and the entity registry. From the caller's perspective it looks identical to `denied`, but the audit log distinguishes them so you can tell whether a token is hitting a missing entity or a permission wall.
 
-The audit log is in-memory only and does not survive an HA restart.
+### Persistence
+
+The audit log is stored in a separate HA storage file (`.storage/atm_audit.json`) and survives HA restarts.
+
+The flush interval controls how often the in-memory buffer is snapshotted to disk. The default is every 15 minutes. ATM also flushes automatically on HA stop, integration reload, and integration unload. Set the interval to "Never" to keep the log in-memory only and disable all disk writes.
+
+The storage file is included in HA full backups and in partial backups of the `.storage` directory.
 
 ---
 
@@ -341,7 +352,7 @@ DELETE     /api/atm/admin/wipe                                Wipe all tokens an
 GET        /api/atm/states                                    All accessible entity states
 GET        /api/atm/states/{entity_id}                        One entity state
 POST       /api/atm/services/{domain}/{service}               Call a service
-GET        /api/atm/history/period/{timestamp}                State history
+GET        /api/atm/history/period/{timestamp}                State history (max 7-day range)
 GET        /api/atm/statistics                                Long-term statistics
 POST       /api/atm/template                                  Render a Jinja2 template
 GET        /api/atm/config                                    HA configuration

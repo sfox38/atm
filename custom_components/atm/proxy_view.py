@@ -4,22 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from datetime import timedelta
 from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+from homeassistant.util.dt import utcnow as _utcnow
 
 from .audit import generate_request_id
+
+_LOGGER = logging.getLogger(__name__)
 from .const import (
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
+    HIGH_RISK_DOMAINS,
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
 from .helpers import (
     FilteredStates as _FilteredStates,
+    ScrubbedState as _ScrubbedState,
     build_error_response as _error,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
@@ -87,6 +94,8 @@ def _count_service_targets(
     )
     return len(candidates | set(explicit_ids))
 
+_MAX_HISTORY_STATES_PER_ENTITY = 10_000
+_MAX_HISTORY_RANGE_DAYS = 7
 
 
 class ATMRootView(HomeAssistantView):
@@ -181,7 +190,7 @@ class ATMStateView(HomeAssistantView):
                  outcome="not_found", client_ip=client_ip)
             return _error("not_found", "Entity not found.", 404, request_id)
 
-        _log(data, token, request_id=request_id, method="GET", resource=entity_id,
+        _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
         return _json_response(scrub_sensitive_attributes(state), 200, request_id, rl_result)
 
@@ -240,6 +249,12 @@ class ATMServiceView(HomeAssistantView):
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
+
+        if domain in HIGH_RISK_DOMAINS:
+            _LOGGER.info(
+                "High-risk service call %s/%s by token %s rid=%s",
+                domain, service, token.name, request_id,
+            )
 
         affected_count = len(permitted_entities)
         call_data = dict(service_data)
@@ -332,6 +347,17 @@ class ATMHistoryView(HomeAssistantView):
                  outcome="allowed", client_ip=client_ip)
             return _json_response({}, 200, request_id, rl_result)
 
+        # Validate time ordering before touching the DB.
+        effective_end = end_time if end_time is not None else _utcnow()
+        if start_time > effective_end:
+            return _error("invalid_request", "start_time must not be after end_time.", 400, request_id)
+
+        # Clamp the query time range to prevent unbounded DB reads. The cap is applied
+        # to the DB query itself, not just the response, to bound recorder thread load.
+        max_start = effective_end - timedelta(days=_MAX_HISTORY_RANGE_DAYS)
+        if start_time < max_start:
+            start_time = max_start
+
         try:
             import functools
 
@@ -352,6 +378,7 @@ class ATMHistoryView(HomeAssistantView):
             )
             history_result = await get_instance(hass).async_add_executor_job(fn)
         except Exception:
+            _LOGGER.warning("History call failed for request %s", request_id, exc_info=True)
             return _error("gateway_timeout", "History call failed.", 504, request_id)
 
         limit_int: int | None = None
@@ -363,19 +390,24 @@ class ATMHistoryView(HomeAssistantView):
                 pass
 
         output: dict[str, Any] = {}
+        effective_limit = limit_int if limit_int is not None else _MAX_HISTORY_STATES_PER_ENTITY
         for eid, states in history_result.items():
             state_dicts = [
                 _scrub_state_dict(s.as_dict() if hasattr(s, "as_dict") else s)
                 for s in states
             ]
-            if limit_int is not None and len(state_dicts) > limit_int:
-                output[eid] = {"states": state_dicts[:limit_int], "truncated": True}
+            if len(state_dicts) > effective_limit:
+                output[eid] = {"states": state_dicts[:effective_limit], "truncated": True}
             else:
-                output[eid] = state_dicts
+                output[eid] = {"states": state_dicts, "truncated": False}
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
-        return _json_response(output, 200, request_id, rl_result)
+        range_headers = {
+            "X-ATM-History-Start": start_time.isoformat(),
+            "X-ATM-History-End": effective_end.isoformat(),
+        }
+        return _json_response(output, 200, request_id, rl_result, extra_headers=range_headers)
 
 
 class ATMStatisticsView(HomeAssistantView):
@@ -461,6 +493,7 @@ class ATMStatisticsView(HomeAssistantView):
             )
             stat_result = await get_instance(hass).async_add_executor_job(fn)
         except Exception:
+            _LOGGER.warning("Statistics call failed for request %s", request_id, exc_info=True)
             return _error("gateway_timeout", "Statistics call failed.", 504, request_id)
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
@@ -540,13 +573,13 @@ class ATMTemplateView(HomeAssistantView):
 
             if token.pass_through:
                 permitted = {
-                    s.entity_id: s
+                    s.entity_id: _ScrubbedState(s)
                     for s in hass.states.async_all()
                     if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
                 }
             else:
                 permitted = {
-                    s.entity_id: s
+                    s.entity_id: _ScrubbedState(s)
                     for s in hass.states.async_all()
                     if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
                 }
@@ -588,6 +621,19 @@ class ATMTemplateView(HomeAssistantView):
                 "label_areas": lambda *a, **kw: [],
                 "floor_entities": lambda *a, **kw: [],
                 "floor_areas": lambda *a, **kw: [],
+                # Block topology-enumeration globals that reveal unpermitted instance structure.
+                "device_attr": lambda *a, **kw: None,
+                "device_id": lambda *a, **kw: None,
+                "areas": lambda *a, **kw: [],
+                "labels": lambda *a, **kw: [],
+                "label_id": lambda *a, **kw: None,
+                "label_name": lambda *a, **kw: None,
+                "floors": lambda *a, **kw: [],
+                "floor_id": lambda *a, **kw: None,
+                "floor_name": lambda *a, **kw: None,
+                "closest": lambda *a, **kw: None,
+                "is_device_attr": lambda *a, **kw: False,
+                "area_id": lambda *a, **kw: None,
             })
         except Exception:
             return _error(
@@ -657,28 +703,16 @@ class ATMServicesView(HomeAssistantView):
         all_services = hass.services.async_services()
 
         if token.pass_through:
-            from .const import BLOCKED_DOMAINS
             filtered = {
                 domain: svcs
                 for domain, svcs in all_services.items()
                 if domain not in BLOCKED_DOMAINS
             }
         else:
-            from homeassistant.helpers import entity_registry as _er
             writable_domains: set[str] = set()
-            for domain_name, node in token.permissions.domains.items():
-                if node.state == "GREEN":
-                    writable_domains.add(domain_name)
-            for eid, node in token.permissions.entities.items():
-                if node.state == "GREEN":
-                    writable_domains.add(eid.split(".")[0])
-            if token.permissions.devices:
-                _er_reg = _er.async_get(hass)
-                for device_id_key, node in token.permissions.devices.items():
-                    if node.state == "GREEN":
-                        for entry in _er_reg.entities.values():
-                            if entry.device_id == device_id_key and not entry.disabled_by:
-                                writable_domains.add(entry.domain)
+            for state in hass.states.async_all():
+                if resolve(state.entity_id, token, hass) == Permission.WRITE:
+                    writable_domains.add(state.entity_id.split(".")[0])
             filtered = {
                 domain: svcs
                 for domain, svcs in all_services.items()

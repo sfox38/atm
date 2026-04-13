@@ -111,7 +111,6 @@ class TokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "token_hash": self.token_hash,
             "created_at": self.created_at.isoformat(),
             "created_by": self.created_by,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
@@ -126,6 +125,11 @@ class TokenRecord:
             "allow_restart": self.allow_restart,
             "permissions": self.permissions.to_dict(),
         }
+
+    def to_storage_dict(self) -> dict:
+        d = self.to_dict()
+        d["token_hash"] = self.token_hash
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> TokenRecord:
@@ -176,7 +180,6 @@ class ArchivedTokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "token_hash": self.token_hash,
             "created_at": self.created_at.isoformat(),
             "created_by": self.created_by,
             "revoked_at": self.revoked_at.isoformat(),
@@ -185,6 +188,11 @@ class ArchivedTokenRecord:
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "pass_through": self.pass_through,
         }
+
+    def to_storage_dict(self) -> dict:
+        d = self.to_dict()
+        d["token_hash"] = self.token_hash
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> ArchivedTokenRecord:
@@ -214,6 +222,8 @@ class GlobalSettings:
     log_entity_names: bool = True
     log_client_ip: bool = True
     notify_on_rate_limit: bool = False
+    audit_flush_interval: int = 15
+    audit_log_maxlen: int = 10000
 
     def to_dict(self) -> dict:
         return {
@@ -225,19 +235,23 @@ class GlobalSettings:
             "log_entity_names": self.log_entity_names,
             "log_client_ip": self.log_client_ip,
             "notify_on_rate_limit": self.notify_on_rate_limit,
+            "audit_flush_interval": self.audit_flush_interval,
+            "audit_log_maxlen": self.audit_log_maxlen,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> GlobalSettings:
         return cls(
-            kill_switch=data.get("kill_switch", False),
-            disable_all_logging=data.get("disable_all_logging", False),
-            log_allowed=data.get("log_allowed", True),
-            log_denied=data.get("log_denied", True),
-            log_rate_limited=data.get("log_rate_limited", True),
-            log_entity_names=data.get("log_entity_names", True),
-            log_client_ip=data.get("log_client_ip", True),
-            notify_on_rate_limit=data.get("notify_on_rate_limit", False),
+            kill_switch=bool(data.get("kill_switch", False)),
+            disable_all_logging=bool(data.get("disable_all_logging", False)),
+            log_allowed=bool(data.get("log_allowed", True)),
+            log_denied=bool(data.get("log_denied", True)),
+            log_rate_limited=bool(data.get("log_rate_limited", True)),
+            log_entity_names=bool(data.get("log_entity_names", True)),
+            log_client_ip=bool(data.get("log_client_ip", True)),
+            notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
+            audit_flush_interval=int(data.get("audit_flush_interval", 15)),
+            audit_log_maxlen=int(data.get("audit_log_maxlen", 10000)),
         )
 
 
@@ -287,8 +301,8 @@ class TokenStore:
         """Persist the current in-memory state to HA storage."""
         await self._store.async_save({
             "version": STORAGE_VERSION,
-            "tokens": [t.to_dict() for t in self._tokens.values()],
-            "archived_tokens": [a.to_dict() for a in self._archived.values()],
+            "tokens": [t.to_storage_dict() for t in self._tokens.values()],
+            "archived_tokens": [a.to_storage_dict() for a in self._archived.values()],
             "settings": self._settings.to_dict(),
         })
 
@@ -468,10 +482,11 @@ class TokenStore:
 
     async def async_delete_archived(self, token_id: str) -> bool:
         """Permanently delete an archived token record. Returns False if not found."""
-        if token_id not in self._archived:
-            return False
-        del self._archived[token_id]
-        await self.async_save()
+        async with self.async_lock:
+            if token_id not in self._archived:
+                return False
+            del self._archived[token_id]
+            await self.async_save()
         return True
 
     def get_settings(self) -> GlobalSettings:

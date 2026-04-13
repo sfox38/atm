@@ -49,10 +49,6 @@ export function AuditView({ tokens }: Props) {
           <button className="btn btn-text btn-sm" onClick={load}>Refresh</button>
         </div>
 
-        <div className="banner banner-info" style={{ marginBottom: 12 }}>
-          Audit log entries are in-memory only and are lost on HA restart. Persistence is planned for a future version.
-        </div>
-
         <div className="filter-row">
           <select
             className="input"

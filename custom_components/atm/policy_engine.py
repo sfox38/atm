@@ -57,6 +57,8 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
     entry = registry.async_get(entity_id)
     if entry:
         entity_id = entry.entity_id
+        # Re-fetch entry for canonical ID so device_id lookup is authoritative.
+        entry = registry.async_get(entity_id)
 
     domain = entity_id.split(".")[0]
 
@@ -185,19 +187,18 @@ def expand_service_targets(
 
     if area_id is not None:
         aids = [area_id] if isinstance(area_id, str) else list(area_id)
-        # Build a device-to-entities index once to avoid O(D*E) nested iteration.
+        # Build indexes once to avoid O(A*E) and O(D*E) nested iteration.
         device_entity_index: dict[str, list[str]] = {}
+        area_entity_index: dict[str, list[str]] = {}
         for entry in entity_registry.entities.values():
-            if entry.device_id and entry.domain == service_domain and not entry.disabled_by:
-                device_entity_index.setdefault(entry.device_id, []).append(entry.entity_id)
+            if entry.domain == service_domain and not entry.disabled_by:
+                if entry.device_id:
+                    device_entity_index.setdefault(entry.device_id, []).append(entry.entity_id)
+                if entry.area_id:
+                    area_entity_index.setdefault(entry.area_id, []).append(entry.entity_id)
         for aid in aids:
-            for entry in entity_registry.entities.values():
-                if (
-                    entry.area_id == aid
-                    and entry.domain == service_domain
-                    and not entry.disabled_by
-                ):
-                    candidates.add(entry.entity_id)
+            for eid in area_entity_index.get(aid, []):
+                candidates.add(eid)
             for device in device_registry.devices.values():
                 if device.area_id == aid:
                     for eid in device_entity_index.get(device.id, []):

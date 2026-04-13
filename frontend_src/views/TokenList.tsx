@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import type { TokenRecord, ArchivedTokenRecord } from "../types";
 import { TokenCreateModal } from "../components/TokenCreateModal";
 import { ArchivedTokenTable } from "../components/ArchivedTokenTable";
@@ -45,15 +45,20 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail 
   const [archived, setArchived] = useState<ArchivedTokenRecord[] | null>(null);
   const [archivedLoading, setArchivedLoading] = useState(false);
 
-  useEffect(() => {
-    if (showArchived && archived === null) {
-      setArchivedLoading(true);
-      api.listArchivedTokens()
-        .then(setArchived)
-        .catch(() => setArchived([]))
-        .finally(() => setArchivedLoading(false));
+  const refreshArchived = useCallback(async () => {
+    setArchivedLoading(true);
+    try {
+      setArchived(await api.listArchivedTokens());
+    } catch {
+      setArchived([]);
+    } finally {
+      setArchivedLoading(false);
     }
-  }, [showArchived, archived]);
+  }, []);
+
+  useEffect(() => {
+    if (showArchived) refreshArchived();
+  }, [showArchived, refreshArchived]);
 
   const filtered = tokens.filter((t) => {
     const q = filter.toLowerCase();
@@ -83,7 +88,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail 
         <div className="card-header">
           <span>Tokens ({tokens.length})</span>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-text btn-sm" onClick={onRefresh}>Refresh</button>
+            <button className="btn btn-text btn-sm" onClick={() => { onRefresh(); if (showArchived) refreshArchived(); }}>Refresh</button>
             <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
               Create Token
             </button>

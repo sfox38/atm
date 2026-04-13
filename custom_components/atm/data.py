@@ -39,6 +39,14 @@ class ATMData:
     async_add_entities_cb: Callable | None = None
     # session_id -> (queue, token_id)
     mcp_sessions: dict[str, tuple[asyncio.Queue, str]] = field(default_factory=dict)
+    # Per-token expiry timers. Values are cancel callbacks from hass.async_call_later.
+    expiry_timers: dict[str, Callable] = field(default_factory=dict)
     # Callbacks wired by __init__.py to decouple sensor lifecycle from views.
     async_on_token_created: Callable | None = None
     async_on_token_archived: Callable | None = None
+    # Set to True once proxy/MCP routes have been registered; prevents duplicate registration.
+    routes_registered: bool = False
+    # Called by the admin settings PATCH when the kill switch is deactivated.
+    async_register_routes: Callable | None = None
+    # Incremented on each wipe so ghost SSE sessions can detect they outlived a wipe.
+    wipe_epoch: int = 0

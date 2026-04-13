@@ -6,6 +6,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -22,6 +23,7 @@ from .const import (
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
+    HIGH_RISK_DOMAINS,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     PROXY_TIMEOUT_SECONDS,
     SSE_HEARTBEAT_INTERVAL,
@@ -31,6 +33,7 @@ from .const import (
 from .data import ATMData
 from .helpers import (
     FilteredStates as _FilteredStates,
+    ScrubbedState as _ScrubbedState,
     archive_expired_token,
     build_error_response as _error,
     fire_rate_limit_events as _fire_rate_limit_events,
@@ -52,6 +55,8 @@ from .policy_engine import (
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 _MCP_VERSION = "2024-11-05"
 
@@ -302,6 +307,7 @@ async def _tool_get_history(
         )
         result = await get_instance(hass).async_add_executor_job(fn)
     except Exception:
+        _LOGGER.warning("MCP history call failed for entity %s", entity_id, exc_info=True)
         return _tool_error("History call failed."), "denied", entity_id
 
     output = {}
@@ -372,6 +378,7 @@ async def _tool_get_statistics(
         )
         result = await get_instance(hass).async_add_executor_job(fn)
     except Exception:
+        _LOGGER.warning("MCP statistics call failed for entity %s", entity_id, exc_info=True)
         return _tool_error("Statistics call failed."), "denied", entity_id
 
     return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
@@ -411,6 +418,12 @@ async def _tool_call_service(
 
     if not permitted_entities:
         return _tool_error("Forbidden."), "denied", resource
+
+    if domain in HIGH_RISK_DOMAINS:
+        _LOGGER.info(
+            "High-risk service call %s/%s by token %s",
+            domain, service, token.name,
+        )
 
     call_data = dict(service_data)
     call_data["entity_id"] = permitted_entities
@@ -477,13 +490,13 @@ async def _tool_render_template(
 
         if token.pass_through:
             permitted = {
-                s.entity_id: s
+                s.entity_id: _ScrubbedState(s)
                 for s in hass.states.async_all()
                 if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
             }
         else:
             permitted = {
-                s.entity_id: s
+                s.entity_id: _ScrubbedState(s)
                 for s in hass.states.async_all()
                 if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
             }
@@ -525,6 +538,19 @@ async def _tool_render_template(
             "label_areas": lambda *a, **kw: [],
             "floor_entities": lambda *a, **kw: [],
             "floor_areas": lambda *a, **kw: [],
+            # Block topology-enumeration globals that reveal unpermitted instance structure.
+            "device_attr": lambda *a, **kw: None,
+            "device_id": lambda *a, **kw: None,
+            "areas": lambda *a, **kw: [],
+            "labels": lambda *a, **kw: [],
+            "label_id": lambda *a, **kw: None,
+            "label_name": lambda *a, **kw: None,
+            "floors": lambda *a, **kw: [],
+            "floor_id": lambda *a, **kw: None,
+            "floor_name": lambda *a, **kw: None,
+            "closest": lambda *a, **kw: None,
+            "is_device_attr": lambda *a, **kw: False,
+            "area_id": lambda *a, **kw: None,
         })
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
@@ -543,7 +569,7 @@ async def _tool_automation_stub(
             "Automation tools are not yet implemented in ATM v1. "
             "Use ha-mcp or the HA native MCP endpoint for automation management."
         ),
-        "denied",
+        "allowed",
         tool_name,
     )
 
@@ -648,6 +674,29 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
     }
 
 
+def _get_effective_hint(token: TokenRecord, entity_id: str, hass: Any) -> str | None:
+    """Return the most specific hint for an entity, checking entity then device then domain nodes."""
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    permissions = token.permissions
+
+    entity_node = permissions.entities.get(entity_id)
+    if entity_node and entity_node.hint:
+        return entity_node.hint
+
+    if entry and entry.device_id:
+        device_node = permissions.devices.get(entry.device_id)
+        if device_node and device_node.hint:
+            return device_node.hint
+
+    domain = entity_id.split(".")[0]
+    domain_node = permissions.domains.get(domain)
+    if domain_node and domain_node.hint:
+        return domain_node.hint
+
+    return None
+
+
 def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     """Build the plain-text context document listing accessible entities and capabilities."""
     lines: list[str] = []
@@ -660,20 +709,16 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
             f"It has unrestricted access to all {count} accessible Home Assistant entities and services."
         )
         lines.append("")
-        lines.append("The ATM domain (sensor.atm_*) is always blocked regardless of token type.")
+        lines.append("The atm domain is always blocked regardless of token type.")
     else:
         states = hass.states.async_all()
         accessible: list[tuple[str, str, str | None]] = []
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm == Permission.WRITE:
-                node = token.permissions.entities.get(state.entity_id)
-                hint = node.hint if node else None
-                accessible.append((state.entity_id, "READ/WRITE", hint))
+                accessible.append((state.entity_id, "READ/WRITE", _get_effective_hint(token, state.entity_id, hass)))
             elif perm == Permission.READ:
-                node = token.permissions.entities.get(state.entity_id)
-                hint = node.hint if node else None
-                accessible.append((state.entity_id, "READ", hint))
+                accessible.append((state.entity_id, "READ", _get_effective_hint(token, state.entity_id, hass)))
 
         accessible.sort(key=lambda x: x[0])
         lines.append("You have access to the following Home Assistant entities:")
@@ -733,10 +778,10 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             entry = registry.async_get(state.entity_id)
             area_id = _resolve_area_id(entry, dev_registry)
             perm_str = "READ/WRITE" if perm == Permission.WRITE else "READ"
-            node = token.permissions.entities.get(state.entity_id)
             e: dict = {"entity_id": state.entity_id, "permission": perm_str, "area_id": area_id}
-            if node and node.hint:
-                e["hint"] = node.hint
+            hint = _get_effective_hint(token, state.entity_id, hass)
+            if hint:
+                e["hint"] = hint
             entities.append(e)
 
     entities.sort(key=lambda e: e["entity_id"])
@@ -788,6 +833,8 @@ async def _dispatch_mcp(
         return resp, "initialize", "/api/atm/mcp", "allowed"
 
     if method in ("notifications/initialized", "initialized"):
+        _log(data, token, request_id=request_id, method=method,
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
         return None, method, "/api/atm/mcp", "allowed"
 
     if method == "ping":
@@ -876,8 +923,10 @@ class ATMMcpSseView(HomeAssistantView):
             return _error("service_unavailable", "Service unavailable.", 503, request_id)
 
         _401 = _error("unauthorized", "Unauthorized.", 401, request_id)
+        _401.headers["WWW-Authenticate"] = 'Bearer realm="ATM"'
 
         for key in ("token", "access_token"):
+
             if key in request.query:
                 return _401
 
@@ -923,48 +972,64 @@ class ATMMcpSseView(HomeAssistantView):
              outcome="allowed", client_ip=client_ip)
 
         session_id = str(uuid.uuid4())
-        queue: asyncio.Queue = asyncio.Queue()
-        data.mcp_sessions[session_id] = (queue, token.id)
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
+        data.mcp_sessions[session_id] = (queue, token.id)
         if token.id not in data.sse_connections:
             data.sse_connections[token.id] = set()
         data.sse_connections[token.id].add(queue)
 
-        response = web.StreamResponse()
-        response.headers["Content-Type"] = "text/event-stream"
-        response.headers["Cache-Control"] = "no-cache"
-        response.headers["X-Accel-Buffering"] = "no"
-        response.headers["X-ATM-Request-ID"] = request_id
-        await response.prepare(request)
-
-        base_url = str(request.url.origin())
-        messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
-        await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
-
-        try:
-            while True:
-                try:
-                    msg = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
-                    )
-                except asyncio.TimeoutError:
-                    await response.write(b": heartbeat\n\n")
-                    continue
-                if msg is None:
-                    break
-                await response.write(
-                    f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
-                )
-        except (ConnectionResetError, asyncio.CancelledError):
-            pass
-        finally:
+        def _cleanup() -> None:
             data.mcp_sessions.pop(session_id, None)
             conns = data.sse_connections.get(token.id)
             if conns is not None:
                 conns.discard(queue)
                 if not conns:
                     data.sse_connections.pop(token.id, None)
+
+        # Re-check token after queue insertion to close the TOCTOU window where
+        # a DELETE/archive could have run between auth check and queue add.
+        # Must happen BEFORE response.prepare() - once headers are sent the
+        # connection is bound to SSE and returning a web.Response is invalid.
+        if data.store.get_token_by_id(token.id) is None:
+            _cleanup()
+            return _error("unauthorized", "Unauthorized.", 401, request_id)
+
+        response = web.StreamResponse()
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        response.headers["X-ATM-Request-ID"] = request_id
+
+        try:
+            await response.prepare(request)
+
+            base_url = str(request.url.origin())
+            messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
+            await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
+
+            session_epoch = data.wipe_epoch
+            try:
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
+                        )
+                    except asyncio.TimeoutError:
+                        if data.wipe_epoch != session_epoch:
+                            break
+                        await response.write(b": heartbeat\n\n")
+                        continue
+                    if msg is None:
+                        break
+                    await response.write(
+                        f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
+                    )
+            except ConnectionResetError:
+                pass
+        finally:
+            _cleanup()
 
         return response
 
@@ -988,7 +1053,12 @@ class ATMMcpSseView(HomeAssistantView):
         body = body_result
 
         if body.get("jsonrpc") != "2.0":
-            return web.Response(status=400, text="Invalid JSON-RPC request")
+            return web.Response(
+                status=400,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(body.get("id"), -32600, "Invalid Request.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         msg_id = body.get("id")
         method = body.get("method", "")
@@ -999,14 +1069,19 @@ class ATMMcpSseView(HomeAssistantView):
         )
 
         if response_msg is None:
-            return web.Response(status=202)
+            return web.Response(status=202, headers={"X-ATM-Request-ID": request_id})
 
-        return web.Response(
+        resp = web.Response(
             status=200,
             content_type="application/json",
             text=json.dumps(response_msg, default=str),
             headers={"X-ATM-Request-ID": request_id},
         )
+        if token.rate_limit_requests > 0:
+            resp.headers["X-RateLimit-Limit"] = str(token.rate_limit_requests)
+            resp.headers["X-RateLimit-Remaining"] = str(rl_result.remaining)
+            resp.headers["X-RateLimit-Reset"] = str(rl_result.reset)
+        return resp
 
 
 class ATMMcpMessagesView(HomeAssistantView):
@@ -1045,7 +1120,10 @@ class ATMMcpMessagesView(HomeAssistantView):
 
         if body.get("jsonrpc") != "2.0":
             if body.get("id") is not None:
-                await queue.put(_jsonrpc_error(body.get("id"), -32600, "Invalid Request."))
+                try:
+                    queue.put_nowait(_jsonrpc_error(body.get("id"), -32600, "Invalid Request."))
+                except asyncio.QueueFull:
+                    return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
             return web.Response(
                 status=202,
                 headers={"X-ATM-Request-ID": request_id},
@@ -1060,7 +1138,10 @@ class ATMMcpMessagesView(HomeAssistantView):
         )
 
         if response_msg is not None:
-            await queue.put(response_msg)
+            try:
+                queue.put_nowait(response_msg)
+            except asyncio.QueueFull:
+                return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
 
         return web.Response(
             status=202,

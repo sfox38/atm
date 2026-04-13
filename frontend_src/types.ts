@@ -58,6 +58,8 @@ export interface GlobalSettings {
   log_entity_names: boolean;
   log_client_ip: boolean;
   notify_on_rate_limit: boolean;
+  audit_flush_interval: number;
+  audit_log_maxlen: number;
 }
 
 export interface AuditEntry {

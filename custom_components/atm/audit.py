@@ -1,17 +1,23 @@
-"""In-memory circular buffer audit log for ATM. No I/O."""
+"""Circular buffer audit log for ATM. Optionally persists entries to HA storage."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from homeassistant.util.dt import utcnow
+from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import AUDIT_LOG_MAXLEN
+from .const import AUDIT_LOG_MAXLEN, AUDIT_STORAGE_VERSION
 from .token_store import GlobalSettings
+
+if TYPE_CHECKING:
+    from homeassistant.helpers.storage import Store
+
+_LOGGER = logging.getLogger(__name__)
 
 Outcome = Literal["allowed", "denied", "not_found", "rate_limited"]
 
@@ -54,16 +60,18 @@ class AuditEntry:
 class AuditLog:
     """Circular buffer audit log.
 
-    State is in-memory only and is lost on HA restart. The maxlen parameter
-    exists for testability; production code always uses the default.
-
     Logging toggles from GlobalSettings are evaluated at record time, not at
     query time. Sensor counters in sensor.py are updated independently of
     these toggles and always reflect total activity.
+
+    When a Store is provided, the log can be persisted to disk via async_save()
+    and restored on startup via async_load(). Passing no store keeps the log
+    purely in-memory (test instances, or when audit_flush_interval is 0).
     """
 
-    def __init__(self, maxlen: int = AUDIT_LOG_MAXLEN) -> None:
+    def __init__(self, maxlen: int = AUDIT_LOG_MAXLEN, store: Store | None = None) -> None:
         self._log: deque[AuditEntry] = deque(maxlen=maxlen)
+        self._store = store
 
     def record(
         self,
@@ -138,8 +146,68 @@ class AuditLog:
         return entries[offset:offset + limit]
 
     def clear(self) -> None:
-        """Remove all entries. Called on wipe action."""
+        """Remove all in-memory entries. Called by tests and the wipe handler."""
         self._log.clear()
+
+    def resize(self, maxlen: int) -> None:
+        """Replace the deque with a new one of the given maxlen.
+
+        If maxlen is smaller than the current length, the oldest entries are
+        dropped automatically by the deque constructor.
+        """
+        self._log = deque(self._log, maxlen=maxlen)
+
+    async def async_save(self) -> None:
+        """Snapshot the in-memory buffer to HA storage.
+
+        No-op when no store is configured (test instances or Never mode).
+        """
+        if self._store is None:
+            return
+        await self._store.async_save({
+            "version": AUDIT_STORAGE_VERSION,
+            "entries": [e.to_dict() for e in self._log],
+        })
+
+    async def async_load(self) -> None:
+        """Populate the in-memory buffer from HA storage.
+
+        Corrupt or unrecognised entries are skipped with a warning. No-op when
+        no store is configured.
+        """
+        if self._store is None:
+            return
+        raw = await self._store.async_load()
+        if not raw:
+            return
+        for r in raw.get("entries", []):
+            try:
+                ts = parse_datetime(r["timestamp"])
+                if ts is None:
+                    raise ValueError(f"unparseable timestamp: {r['timestamp']!r}")
+                self._log.append(AuditEntry(
+                    request_id=r["request_id"],
+                    timestamp=ts,
+                    token_id=r["token_id"],
+                    token_name=r["token_name"],
+                    method=r["method"],
+                    resource=r["resource"],
+                    outcome=r["outcome"],
+                    client_ip=r["client_ip"],
+                    pass_through=r.get("pass_through", False),
+                ))
+            except (KeyError, TypeError, ValueError) as exc:
+                _LOGGER.warning("Skipping corrupt audit entry: %s", exc)
+
+    async def async_wipe(self) -> None:
+        """Clear all entries from memory and write an empty snapshot to disk."""
+        self._log.clear()
+        if self._store is None:
+            return
+        await self._store.async_save({
+            "version": AUDIT_STORAGE_VERSION,
+            "entries": [],
+        })
 
     def __len__(self) -> int:
         return len(self._log)

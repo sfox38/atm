@@ -46,7 +46,7 @@ class ATMTokenSensor(SensorEntity):
     """
 
     _attr_should_poll = False
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     _NUMERIC_TYPES = frozenset({"request_count", "denied_count", "rate_limit_hits", "expires_in"})
     _COUNT_TYPES = frozenset({"request_count", "denied_count", "rate_limit_hits"})
@@ -63,10 +63,10 @@ class ATMTokenSensor(SensorEntity):
         self._sensor_type = sensor_type
         self._data = data
         self._attr_unique_id = f"atm_{slug}_{sensor_type}"
-        self._attr_name = f"ATM {token.name} {sensor_type.replace('_', ' ').title()}"
+        self._attr_name = sensor_type.replace("_", " ").title()
 
         if sensor_type in self._COUNT_TYPES:
-            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         elif sensor_type == "expires_in":
             self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_native_unit_of_measurement = "d"
@@ -103,7 +103,7 @@ class ATMTokenSensor(SensorEntity):
 
         if sensor_type == "last_access":
             if token.last_used_at is None:
-                return "never"
+                return None
             return token.last_used_at.isoformat()
 
         if sensor_type == "expires_in":
@@ -157,17 +157,25 @@ async def async_remove_token_sensors(
     """Remove sensor entities for a revoked/archived token and clean up the entity registry.
 
     Removing from the entity registry prevents 'unavailable' ghost entries after
-    the token is gone.
+    the token is gone. The associated device is also removed from the device registry.
     """
+    from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
     data: ATMData = hass.data[DOMAIN]
     sensors = data.platform_entities.pop(token_slug, [])
-    registry = er.async_get(hass)
+    entity_reg = er.async_get(hass)
+    device_reg = dr.async_get(hass)
+    device_id = None
     for sensor in sensors:
         await sensor.async_remove()
         if sensor.unique_id:
-            entry = registry.async_get_entity_id(
+            entity_id = entity_reg.async_get_entity_id(
                 "sensor", DOMAIN, sensor.unique_id
             )
-            if entry:
-                registry.async_remove(entry)
+            if entity_id:
+                entry = entity_reg.async_get(entity_id)
+                if entry and device_id is None:
+                    device_id = entry.device_id
+                entity_reg.async_remove(entity_id)
+    if device_id:
+        device_reg.async_remove_device(device_id)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, Event
@@ -9,10 +11,11 @@ from homeassistant.helpers import area_registry as ar_mod
 from homeassistant.helpers import device_registry as dr_mod
 from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from .audit import AuditLog
-from .const import AUDIT_LOG_MAXLEN, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL
+from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL
 from .data import ATMData
-from .helpers import archive_expired_token, terminate_token_connections
+from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
 
@@ -29,7 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     store = await TokenStore.async_create(hass)
     rate_limiter = RateLimiter()
-    audit = AuditLog(maxlen=AUDIT_LOG_MAXLEN)
+    audit_store = Store(hass, AUDIT_STORAGE_VERSION, AUDIT_STORAGE_KEY)
+    audit = AuditLog(store=audit_store, maxlen=store.get_settings().audit_log_maxlen)
+    await audit.async_load()
 
     data = ATMData(
         store=store,
@@ -59,14 +64,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             view.hass = hass
             hass.http.register_view(view)
 
+    data.async_register_routes = _register_routes
     if not settings.kill_switch:
         await _register_routes()
+        data.routes_registered = True
 
     from .sensor import async_create_token_sensors, async_remove_token_sensors
 
     async def _on_token_created(token) -> None:
         """Create sensor entities when a new token is minted."""
         await async_create_token_sensors(hass, entry, token)
+        schedule_expiry_timer(hass, data, token)
 
     async def _on_token_archived(token_slug: str) -> None:
         """Remove sensor entities when a token is revoked or archived."""
@@ -83,17 +91,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_flush = async_track_time_interval(hass, _flush_last_used, FLUSH_INTERVAL)
     entry.async_on_unload(cancel_flush)
 
+    async def _audit_flush_loop() -> None:
+        while True:
+            interval = data.store.get_settings().audit_flush_interval
+            if interval == 0:
+                await asyncio.sleep(300)
+                continue
+            await asyncio.sleep(interval * 60)
+            await audit.async_save()
+
+    audit_task = hass.async_create_background_task(
+        _audit_flush_loop(), "atm_audit_flush_loop"
+    )
+    entry.async_on_unload(audit_task.cancel)
+
     async def _check_expired_tokens(_now=None) -> None:
         for token in list(store.list_tokens()):
             if token.is_expired():
                 await archive_expired_token(hass, data, token)
 
     await _check_expired_tokens()
+    for _token in store.list_tokens():
+        schedule_expiry_timer(hass, data, _token)
     cancel_expiry = async_track_time_interval(hass, _check_expired_tokens, EXPIRY_CHECK_INTERVAL)
     entry.async_on_unload(cancel_expiry)
+    entry.async_on_unload(lambda: [cancel_expiry_timer(data, tid) for tid in list(data.expiry_timers)])
 
     async def _on_stop(event: Event) -> None:
+        audit_task.cancel()
         await store.async_flush_last_used()
+        await audit.async_save()
 
     entry.async_on_unload(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
@@ -120,6 +147,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if data is not None:
         for token_id in list(data.sse_connections.keys()):
             await terminate_token_connections(token_id, data.sse_connections)
+        await data.audit.async_save()
 
     from .panel import remove_atm_panel
     remove_atm_panel(hass)

@@ -27,6 +27,9 @@ FLUSH_INTERVAL = datetime.timedelta(minutes=5)
 EXPIRY_CHECK_INTERVAL = datetime.timedelta(minutes=1)
 
 AUDIT_LOG_MAXLEN = 10000
+AUDIT_STORAGE_KEY = "atm_audit"
+AUDIT_STORAGE_VERSION = 1
+AUDIT_FLUSH_INTERVAL_DEFAULT = 15  # minutes; 0 = never
 
 SENSITIVE_ATTRIBUTES = frozenset({
     "entity_picture",
@@ -36,6 +39,17 @@ SENSITIVE_ATTRIBUTES = frozenset({
 })
 
 BLOCKED_DOMAINS = frozenset({"atm"})
+
+HIGH_RISK_DOMAINS = frozenset({
+    "homeassistant",
+    "recorder",
+    "system_log",
+    "hassio",
+    "backup",
+    "notify",
+    "persistent_notification",
+    "mqtt",
+})
 
 DUAL_GATE_SERVICES = frozenset({
     "homeassistant/restart",

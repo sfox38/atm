@@ -9,9 +9,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import MAX_REQUEST_BODY_BYTES, TOKEN_LENGTH, TOKEN_PREFIX
+from .const import MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
 from .policy_engine import parse_relative_time
 from .token_store import token_name_slug
 
@@ -157,6 +159,7 @@ async def get_authenticated_token(
         return build_error_response("service_unavailable", "Service unavailable.", 503, request_id)
 
     _401 = build_error_response("unauthorized", "Unauthorized.", 401, request_id)
+    _401.headers["WWW-Authenticate"] = 'Bearer realm="ATM"'
 
     for key in ("token", "access_token"):
         if key in request.query:
@@ -208,6 +211,37 @@ async def get_authenticated_token(
     return token, rl_result
 
 
+def cancel_expiry_timer(data: ATMData, token_id: str) -> None:
+    """Cancel and remove the pending expiry timer for a token, if one exists."""
+    cancel = data.expiry_timers.pop(token_id, None)
+    if cancel is not None:
+        cancel()
+
+
+def schedule_expiry_timer(hass: HomeAssistant, data: ATMData, token: TokenRecord) -> None:
+    """Schedule a timer to archive a token at its expiry time.
+
+    If the token has no expiry, or has already expired, no timer is scheduled.
+    Any previously registered timer for this token is cancelled first.
+    """
+    if token.expires_at is None:
+        return
+    cancel_expiry_timer(data, token.id)
+    delay = (token.expires_at - utcnow()).total_seconds()
+    if delay <= 0:
+        return
+
+    @callback
+    def _on_expiry(_now=None) -> None:
+        data.expiry_timers.pop(token.id, None)
+        hass.async_create_background_task(
+            archive_expired_token(hass, data, token),
+            f"atm_expire_{token.id}",
+        )
+
+    data.expiry_timers[token.id] = async_call_later(hass, delay, _on_expiry)
+
+
 async def archive_expired_token(
     hass: HomeAssistant,
     data: ATMData,
@@ -221,7 +255,10 @@ async def archive_expired_token(
     """
     now = utcnow()
     slug = token_name_slug(token.name)
-    await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
+    cancel_expiry_timer(data, token.id)
+    archived = await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
+    if archived is None:
+        return
     await terminate_token_connections(token.id, data.sse_connections)
     data.rate_limiter.destroy(token.id)
     data.rate_limit_notified.pop(token.id, None)
@@ -245,7 +282,80 @@ async def terminate_token_connections(
     """
     queues = sse_connections.pop(token_id, set())
     for queue in queues:
-        await queue.put(None)
+        try:
+            queue.put_nowait(None)
+        except asyncio.QueueFull:
+            # Queue is at capacity (slow/disconnected client). Evict one message to
+            # make room for the sentinel so the SSE loop exits without blocking.
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            queue.put_nowait(None)
+
+
+class _ContextProxy(dict):
+    """Dict subclass that also supports attribute access.
+
+    Used by ScrubbedState.context so templates can use both context.id and
+    context | tojson without TypeError. Behaves as a plain dict for json.dumps().
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+class ScrubbedState:
+    """Lightweight State wrapper that strips sensitive attributes for use in template sandboxes."""
+
+    def __init__(self, raw: Any) -> None:
+        self.entity_id = raw.entity_id
+        self.state = raw.state
+        self.attributes = {k: v for k, v in raw.attributes.items() if k not in SENSITIVE_ATTRIBUTES}
+        self.last_updated = getattr(raw, "last_updated", None)
+        self.last_changed = getattr(raw, "last_changed", None)
+        # Strip user_id from context to prevent HA user ID enumeration via templates.
+        ctx = getattr(raw, "context", None)
+        if ctx is not None:
+            self.context = _ContextProxy({
+                "id": getattr(ctx, "id", None),
+                "parent_id": getattr(ctx, "parent_id", None),
+                "user_id": None,
+            })
+        else:
+            self.context = None
+
+    @property
+    def domain(self) -> str:
+        return self.entity_id.split(".")[0]
+
+    @property
+    def object_id(self) -> str:
+        return self.entity_id.split(".", 1)[1] if "." in self.entity_id else self.entity_id
+
+    @property
+    def name(self) -> str:
+        friendly = self.attributes.get("friendly_name")
+        if friendly:
+            return str(friendly)
+        return self.object_id.replace("_", " ").title()
+
+    def as_dict(self) -> dict:
+        return {
+            "entity_id": self.entity_id,
+            "state": self.state,
+            "attributes": self.attributes,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "last_changed": self.last_changed.isoformat() if self.last_changed else None,
+            "context": {
+                "id": getattr(self.context, "id", None),
+                "parent_id": getattr(self.context, "parent_id", None),
+                "user_id": None,
+            } if self.context is not None else None,
+        }
 
 
 class FilteredStates:
