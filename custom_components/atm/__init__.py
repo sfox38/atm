@@ -13,7 +13,7 @@ from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from .audit import AuditLog
-from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL
+from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL
 from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
 from .rate_limiter import RateLimiter
@@ -90,6 +90,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     cancel_flush = async_track_time_interval(hass, _flush_last_used, FLUSH_INTERVAL)
     entry.async_on_unload(cancel_flush)
+
+    def _push_sensor_updates(_now=None) -> None:
+        for sensors in data.token_id_sensors.values():
+            for sensor in sensors:
+                if sensor.hass is not None:
+                    sensor.async_write_ha_state()
+
+    cancel_sensor_push = async_track_time_interval(hass, _push_sensor_updates, SENSOR_PUSH_INTERVAL)
+    entry.async_on_unload(cancel_sensor_push)
 
     async def _audit_flush_loop() -> None:
         while True:

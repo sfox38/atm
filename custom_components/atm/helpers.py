@@ -186,6 +186,11 @@ async def get_authenticated_token(
         await archive_expired_token(hass, data, token)
         return _401
 
+    # Update last_used before the rate limit check so last_access reflects every
+    # attempted request, not just allowed ones. This keeps last_access consistent
+    # with request_count, which also increments on rate-limited requests.
+    data.store.update_last_used(token.id, utcnow())
+
     rl_result = data.rate_limiter.check(
         token.id,
         token.rate_limit_requests,
@@ -207,7 +212,6 @@ async def get_authenticated_token(
         resp.headers["Retry-After"] = str(rl_result.retry_after)
         return resp
 
-    data.store.update_last_used(token.id, utcnow())
     return token, rl_result
 
 
@@ -413,4 +417,5 @@ def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:
         counters["rate_limit_hits"] += 1
 
     for sensor in data.token_id_sensors.get(token_id, []):
-        sensor.async_write_ha_state()
+        if sensor.hass is not None:
+            sensor.async_write_ha_state()

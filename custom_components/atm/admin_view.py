@@ -782,6 +782,8 @@ class ATMAdminTokenAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
+        if entries is None:
+            return _err("invalid_request", f"Unknown outcome filter: {outcome_filter!r}.", 400, rid)
         return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
@@ -814,6 +816,8 @@ class ATMAdminAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
+        if entries is None:
+            return _err("invalid_request", f"Unknown outcome filter: {outcome_filter!r}.", 400, rid)
         return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
@@ -946,6 +950,11 @@ class ATMAdminWipeView(HomeAssistantView):
                 *[data.async_on_token_archived(slug) for slug in active_slugs],
                 return_exceptions=True,
             )
+        # Clear unconditionally: if any sensor removal above failed and left stale
+        # entries in token_id_sensors, they would cause async_write_ha_state() to
+        # be called for token IDs that no longer exist. Since the wipe removes all
+        # tokens, there are no valid sensors left regardless.
+        data.token_id_sensors.clear()
 
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 

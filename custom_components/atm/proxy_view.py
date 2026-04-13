@@ -626,6 +626,8 @@ class ATMTemplateView(HomeAssistantView):
                 **template_blocklist_vars(),
             })
         except Exception:
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip)
             return _error(
                 "invalid_request",
                 "Template rendering failed.",

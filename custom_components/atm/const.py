@@ -25,6 +25,7 @@ DEFAULT_RATE_LIMIT_BURST = 10
 SSE_HEARTBEAT_INTERVAL = datetime.timedelta(seconds=15)
 FLUSH_INTERVAL = datetime.timedelta(minutes=5)
 EXPIRY_CHECK_INTERVAL = datetime.timedelta(minutes=1)
+SENSOR_PUSH_INTERVAL = datetime.timedelta(hours=1)
 
 AUDIT_LOG_MAXLEN = 10000
 AUDIT_STORAGE_KEY = "atm_audit"

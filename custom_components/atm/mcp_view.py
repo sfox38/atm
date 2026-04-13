@@ -637,7 +637,7 @@ def _resolve_area_id(entry: Any, device_registry: Any) -> str | None:
     return None
 
 
-def _build_server_info(token: TokenRecord, hass: Any, base_url: str = "") -> dict:
+def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
     """Build the atm://server-info resource payload for the MCP resources/read endpoint."""
     states = hass.states.async_all()
     if token.pass_through:

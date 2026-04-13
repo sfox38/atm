@@ -459,6 +459,8 @@ class TokenStore:
         token = self._tokens.get(token_id)
         if token is None:
             return None
+        if node_type not in ("domains", "devices", "entities"):
+            return None
         collection = getattr(token.permissions, node_type, None)
         if collection is None:
             return None

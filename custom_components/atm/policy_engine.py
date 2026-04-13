@@ -269,12 +269,19 @@ def filter_service_response(
 ) -> Any:
     """Recursively redact entity IDs the token cannot access from service response data."""
     if _depth > 10:
-        # Still check strings at this depth - they can contain entity IDs.
-        # Stop recursing into containers to prevent unbounded traversal.
+        # Depth limit reached. Still redact entity ID strings, but truncate
+        # containers to empty rather than returning their raw contents - a dict
+        # or list at this depth could contain entity IDs at deeper levels that
+        # would bypass redaction if returned as-is.
         if isinstance(response_data, str) and _ENTITY_ID_RE.match(response_data):
             perm = resolve(response_data, token, hass)
             if perm in (Permission.NO_ACCESS, Permission.DENY, Permission.NOT_FOUND):
                 return "<redacted>"
+            return response_data
+        if isinstance(response_data, dict):
+            return {}
+        if isinstance(response_data, list):
+            return []
         return response_data
     if isinstance(response_data, str):
         if _ENTITY_ID_RE.match(response_data):
