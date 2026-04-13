@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { TokenRecord, PatchTokenBody } from "../types";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
@@ -26,12 +26,71 @@ function tokenStatus(t: TokenRecord): string {
   return "Active";
 }
 
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+}
+
+function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string; tokenName: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [closeEnabled, setCloseEnabled] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    timerRef.current = setTimeout(() => setCloseEnabled(true), 3000);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
+  async function copy() {
+    await copyToClipboard(rawToken);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h3 className="modal-title">Token Rotated: {tokenName}</h3>
+        <div className="amber-block">
+          <p><strong>The old token value is now invalid.</strong> Copy the new token before closing. It will not be shown again.</p>
+        </div>
+        <div className="token-display">{rawToken}</div>
+        <div className="modal-actions">
+          <button className="btn btn-primary" onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</button>
+          <button
+            className="btn btn-text"
+            onClick={onClose}
+            disabled={!closeEnabled}
+            title={closeEnabled ? undefined : "Wait 3 seconds before closing"}
+          >
+            {closeEnabled ? "Close" : "Close (3s)"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TokenDetailView({ tokenId, onBack }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [showRevoke, setShowRevoke] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [rotatedRawToken, setRotatedRawToken] = useState<string | null>(null);
   const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [entityTree, setEntityTree] = useState<import("../types").EntityTree | null>(null);
   const [ptToggling, setPtToggling] = useState(false);
@@ -69,6 +128,20 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
     }
   }
 
+  async function rotate() {
+    setRotating(true);
+    try {
+      const resp = await api.rotateToken(tokenId);
+      const { token: rawToken } = resp as { token: string };
+      setRotatedRawToken(rawToken);
+      setShowRotateConfirm(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to rotate token.");
+    } finally {
+      setRotating(false);
+    }
+  }
+
   async function enablePassThrough() {
     if (!ptConfirmed) return;
     setPtToggling(true);
@@ -88,6 +161,10 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
   if (loading) return <Loading />;
   if (error && !token) return <div><button className="btn btn-text" onClick={onBack}>Back</button><ErrorMsg msg={error} /></div>;
   if (!token) return null;
+
+  if (rotatedRawToken) {
+    return <RotatedTokenModal rawToken={rotatedRawToken} tokenName={token.name} onClose={() => setRotatedRawToken(null)} />;
+  }
 
   const status = tokenStatus(token);
   const statusClass = status === "Active" ? "badge-green" : status === "Expired" ? "badge-grey" : "badge-red";
@@ -114,25 +191,50 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
         <div className="card-header">
           <span>{token.name}</span>
           <div style={{ display: "flex", gap: 8 }}>
-            {!showRevoke ? (
+            {!showRotateConfirm && !showRevoke && (
               <button
-                className="btn btn-danger btn-sm"
-                onClick={() => setShowRevoke(true)}
+                className="btn btn-text btn-sm"
+                onClick={() => setShowRotateConfirm(true)}
               >
-                Revoke
+                Rotate
               </button>
-            ) : (
+            )}
+            {showRotateConfirm && (
               <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 13 }}>Revoke token?</span>
+                <span style={{ fontSize: 13 }}>Old token invalidated immediately. Continue?</span>
                 <button
-                  className="btn btn-danger btn-sm"
-                  onClick={revoke}
-                  disabled={revoking}
+                  className="btn btn-primary btn-sm"
+                  onClick={rotate}
+                  disabled={rotating}
                 >
-                  {revoking ? "Revoking..." : "Confirm"}
+                  {rotating ? "Rotating..." : "Confirm"}
                 </button>
-                <button className="btn btn-text btn-sm" onClick={() => setShowRevoke(false)}>Cancel</button>
+                <button className="btn btn-text btn-sm" onClick={() => setShowRotateConfirm(false)}>Cancel</button>
               </span>
+            )}
+            {!showRotateConfirm && (
+              <>
+                {!showRevoke ? (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => setShowRevoke(true)}
+                  >
+                    Revoke
+                  </button>
+                ) : (
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 13 }}>Revoke token?</span>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={revoke}
+                      disabled={revoking}
+                    >
+                      {revoking ? "Revoking..." : "Confirm"}
+                    </button>
+                    <button className="btn btn-text btn-sm" onClick={() => setShowRevoke(false)}>Cancel</button>
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -216,6 +318,12 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
             <div className="card-header">Rate Limiting</div>
             <RateLimitConfig token={token} onUpdate={setToken} />
           </div>
+          {!token.pass_through && (
+            <div className="card">
+              <div className="card-header">Effective Permission Simulator</div>
+              <PermissionSimulator tokenId={tokenId} />
+            </div>
+          )}
         </div>
 
         <div>
@@ -248,16 +356,10 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
       </div>
 
       {!token.pass_through && (
-        <>
-          <div className="card">
-            <div className="card-header">Permission Summary</div>
-            <PermissionSummary permissions={token.permissions} entityTree={entityTree} />
-          </div>
-          <div className="card">
-            <div className="card-header">Effective Permission Simulator</div>
-            <PermissionSimulator tokenId={tokenId} />
-          </div>
-        </>
+        <div className="card">
+          <div className="card-header">Permission Summary</div>
+          <PermissionSummary permissions={token.permissions} entityTree={entityTree} />
+        </div>
       )}
 
       {showAreaPicker && entityTree && (

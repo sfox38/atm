@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-Outcome = Literal["allowed", "denied", "not_found", "rate_limited"]
+Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented"]
 
 _REDACTED = "[redacted]"
 
@@ -98,7 +98,7 @@ class AuditLog:
 
         if outcome == "allowed" and not settings.log_allowed:
             return
-        if outcome in ("denied", "not_found") and not settings.log_denied:
+        if outcome in ("denied", "not_found", "not_implemented") and not settings.log_denied:
             return
         if outcome == "rate_limited" and not settings.log_rate_limited:
             return
@@ -118,6 +118,8 @@ class AuditLog:
             pass_through=pass_through,
         ))
 
+    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented"})
+
     def query(
         self,
         *,
@@ -126,11 +128,15 @@ class AuditLog:
         client_ip: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[AuditEntry]:
+    ) -> list[AuditEntry] | None:
         """Return filtered, paginated audit entries in reverse-chronological order.
 
+        Returns None when outcome is not a recognised value, allowing the caller
+        to return a 400 error rather than silently returning an empty list.
         limit is capped at MAX_QUERY_LIMIT (500). offset is applied after filtering.
         """
+        if outcome is not None and outcome not in self._VALID_OUTCOMES:
+            return None
         limit = min(limit, MAX_QUERY_LIMIT)
 
         entries = list(self._log)

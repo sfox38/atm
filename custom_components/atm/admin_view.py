@@ -17,9 +17,9 @@ from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
 from .data import ATMData
-from .helpers import terminate_token_connections, token_name_slug
-from .policy_engine import Permission, filter_entities_for_token, resolve
-from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES
+from .helpers import terminate_token_connections
+from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
+from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES, token_name_slug
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -430,7 +430,7 @@ class ATMAdminTokenView(HomeAssistantView):
                 k: v for k, v in body.items()
                 if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
                          "allow_automation_write", "allow_config_read",
-                         "allow_template_render", "allow_restart")
+                         "allow_template_render", "allow_restart", "allow_service_response")
             }
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
@@ -637,10 +637,13 @@ class ATMAdminResolveView(HomeAssistantView):
             Permission.NOT_FOUND: "NOT_FOUND",
         }
 
+        effective_hint = get_effective_hint(token, entity_id, hass)
+
         return _ok({
             "entity_id": entity_id,
             "resolution_path": resolution_path,
             "effective": effective_map.get(perm, "NO_ACCESS"),
+            "effective_hint": effective_hint,
         }, request_id=rid)
 
 
@@ -778,6 +781,8 @@ class ATMAdminTokenAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
+        if entries is None:
+            return _err("invalid_request", f"Unknown outcome filter: {outcome_filter!r}.", 400, rid)
         return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
@@ -810,6 +815,8 @@ class ATMAdminAuditView(HomeAssistantView):
             limit=limit,
             offset=offset,
         )
+        if entries is None:
+            return _err("invalid_request", f"Unknown outcome filter: {outcome_filter!r}.", 400, rid)
         return _ok([e.to_dict() for e in entries], request_id=rid)
 
 
@@ -942,8 +949,47 @@ class ATMAdminWipeView(HomeAssistantView):
                 *[data.async_on_token_archived(slug) for slug in active_slugs],
                 return_exceptions=True,
             )
+        # Clear unconditionally: if any sensor removal above failed and left stale
+        # entries in token_id_sensors, they would cause async_write_ha_state() to
+        # be called for token IDs that no longer exist. Since the wipe removes all
+        # tokens, there are no valid sensors left regardless.
+        data.token_id_sensors.clear()
 
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
+
+
+class ATMAdminTokenRotateView(HomeAssistantView):
+    """POST /api/atm/admin/tokens/{token_id}/rotate - replace the raw token value atomically."""
+
+    url = "/api/atm/admin/tokens/{token_id}/rotate"
+    name = "api:atm:admin:token_rotate"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        user = request[KEY_HASS_USER]
+
+        async with data.store.async_lock:
+            result = await data.store.async_rotate_token(token_id)
+
+        if result is None:
+            return _err("not_found", "Token not found.", 404, rid)
+
+        token, raw_token = result
+
+        hass.bus.async_fire("atm_token_rotated", {
+            "token_id": token.id,
+            "token_name": token.name,
+            "rotated_by": user.id,
+            "timestamp": utcnow().isoformat(),
+        })
+
+        response_body = token.to_dict()
+        response_body["token"] = raw_token
+        return _ok(response_body, request_id=rid)
 
 
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
@@ -957,6 +1003,7 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminPermissionDeviceView,
     ATMAdminPermissionEntityView,
     ATMAdminResolveView,
+    ATMAdminTokenRotateView,
     ATMAdminScopeView,
     ATMAdminEntityTreeView,
     ATMAdminTokenStatsView,

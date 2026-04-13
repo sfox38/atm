@@ -499,6 +499,7 @@ const PANEL_CSS = `
   .outcome-denied { color: var(--error-color, #f44336); font-weight: 500; }
   .outcome-not_found { color: var(--secondary-text-color, #9e9e9e); font-weight: 500; }
   .outcome-rate_limited { color: var(--warning-color, #ff9800); font-weight: 500; }
+  .outcome-not_implemented { color: var(--info-color, #2196f3); font-weight: 500; }
 
   /* Permission summary */
   .perm-summary { font-family: "Roboto Mono", monospace; font-size: 12px; }

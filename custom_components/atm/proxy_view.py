@@ -45,6 +45,7 @@ from .policy_engine import (
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
+    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
@@ -229,6 +230,36 @@ class ATMServiceView(HomeAssistantView):
         area_id = body.get("area_id")
         service_data = {k: v for k, v in body.items() if k not in ("entity_id", "device_id", "area_id")}
 
+        # DUAL_GATE_SERVICES (homeassistant/restart, homeassistant/stop) have no
+        # entities in hass.states. Routing them through resolve_service_targets
+        # always produces an empty list and a spurious 403. The allow_restart
+        # gate above is the only permission check required for these services.
+        if service_key in DUAL_GATE_SERVICES:
+            if domain in HIGH_RISK_DOMAINS:
+                _LOGGER.info(
+                    "High-risk service call %s/%s by token %s rid=%s",
+                    domain, service, token.name, request_id,
+                )
+            try:
+                async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+                    await hass.services.async_call(
+                        domain, service, service_data, blocking=True, return_response=False,
+                    )
+            except asyncio.TimeoutError:
+                _log(data, token, request_id=request_id, method="POST", resource=resource,
+                     outcome="allowed", client_ip=client_ip)
+                return _json_response(
+                    {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
+                    200, request_id, rl_result,
+                )
+            except (ServiceNotFound, HomeAssistantError):
+                _log(data, token, request_id=request_id, method="POST", resource=resource,
+                     outcome="denied", client_ip=client_ip)
+                return _error("forbidden", "Forbidden.", 403, request_id)
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="allowed", client_ip=client_ip)
+            return _json_response({"success": True}, 200, request_id, rl_result)
+
         requested_count = _count_service_targets(entity_id, device_id, area_id, domain, hass)
 
         try:
@@ -265,6 +296,18 @@ class ATMServiceView(HomeAssistantView):
             "X-ATM-Entities-Affected": str(affected_count),
         }
 
+        use_return_response = False
+        if token.allow_service_response:
+            try:
+                from homeassistant.core import SupportsResponse as _SR
+                handler = hass.services.async_services().get(domain, {}).get(service)
+                use_return_response = (
+                    handler is not None and
+                    getattr(handler, "supports_response", None) not in (None, _SR.NONE)
+                )
+            except Exception:
+                pass
+
         try:
             async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
                 svc_response = await hass.services.async_call(
@@ -272,7 +315,7 @@ class ATMServiceView(HomeAssistantView):
                     service,
                     call_data,
                     blocking=True,
-                    return_response=False,
+                    return_response=use_return_response,
                 )
         except asyncio.TimeoutError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
@@ -610,32 +653,11 @@ class ATMTemplateView(HomeAssistantView):
                 "is_state": _is_state,
                 "is_state_attr": _is_state_attr,
                 "has_value": _has_value,
-                # Block entity-enumeration HA globals that bypass ATM permission filtering.
-                # Jinja2 local variables shadow globals of the same name.
-                "integration_entities": lambda *a, **kw: [],
-                "area_entities": lambda *a, **kw: [],
-                "area_devices": lambda *a, **kw: [],
-                "device_entities": lambda *a, **kw: [],
-                "expand": lambda *a, **kw: [],
-                "label_entities": lambda *a, **kw: [],
-                "label_areas": lambda *a, **kw: [],
-                "floor_entities": lambda *a, **kw: [],
-                "floor_areas": lambda *a, **kw: [],
-                # Block topology-enumeration globals that reveal unpermitted instance structure.
-                "device_attr": lambda *a, **kw: None,
-                "device_id": lambda *a, **kw: None,
-                "areas": lambda *a, **kw: [],
-                "labels": lambda *a, **kw: [],
-                "label_id": lambda *a, **kw: None,
-                "label_name": lambda *a, **kw: None,
-                "floors": lambda *a, **kw: [],
-                "floor_id": lambda *a, **kw: None,
-                "floor_name": lambda *a, **kw: None,
-                "closest": lambda *a, **kw: None,
-                "is_device_attr": lambda *a, **kw: False,
-                "area_id": lambda *a, **kw: None,
+                **template_blocklist_vars(),
             })
         except Exception:
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip)
             return _error(
                 "invalid_request",
                 "Template rendering failed.",

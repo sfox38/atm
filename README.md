@@ -180,6 +180,7 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 | `allow_config_read` | Reading HA configuration data |
 | `allow_template_render` | Rendering Jinja2 templates |
 | `allow_automation_write` | Automation management (returns a not-implemented error in v1) |
+| `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. |
 
 `allow_restart` is the one exception to pass-through mode's wide access. Even a pass-through token cannot restart HA without this flag explicitly set.
 
@@ -281,7 +282,7 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 | Kill switch | Off | When on, proxy and MCP routes are unregistered entirely |
 | Disable all logging | Off | Suppresses all auditing |
 | Log allowed requests | On | Record successful requests |
-| Log denied requests | On | Record blocked requests |
+| Log denied requests | On | Record blocked requests and unsupported MCP method calls |
 | Log rate-limited requests | On | Record rate-limited requests |
 | Log entity names | On | Include entity IDs in audit entries |
 | Log client IP | On | Include caller IP in audit entries |
@@ -295,9 +296,11 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 
 ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings.
 
-Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, or `rate_limited`), and client IP.
+Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, `rate_limited`, or `not_implemented`), and client IP.
 
 `not_found` is recorded when an entity is genuinely absent from both HA state and the entity registry. From the caller's perspective it looks identical to `denied`, but the audit log distinguishes them so you can tell whether a token is hitting a missing entity or a permission wall.
+
+`not_implemented` is recorded when an MCP client calls a method that ATM does not support (for example, `resources/templates/list`). This is a protocol-level gap, not a permission block, and does not increment the token's denied counter.
 
 ### Persistence
 
@@ -315,9 +318,10 @@ The storage file is included in HA full backups and in partial backups of the `.
 |---|---|
 | `atm_token_revoked` | A token is revoked |
 | `atm_token_expired` | A token's expiry time passes and it is first accessed |
+| `atm_token_rotated` | A token's raw value is rotated |
 | `atm_rate_limited` | A token exceeds its rate limit (once per token per minute) |
 
-Event data includes `token_id`, `token_name`, and `timestamp`. Revocation events also include `revoked_by` (the HA user ID of the admin who revoked it).
+Event data includes `token_id`, `token_name`, and `timestamp`. Revocation and rotation events also include `revoked_by` / `rotated_by` (the HA user ID of the admin who performed the action).
 
 ---
 
@@ -333,7 +337,8 @@ GET/PUT    /api/atm/admin/tokens/{id}/permissions             Read or replace pe
 PATCH      /api/atm/admin/tokens/{id}/permissions/domains/{node}
 PATCH      /api/atm/admin/tokens/{id}/permissions/devices/{node}
 PATCH      /api/atm/admin/tokens/{id}/permissions/entities/{node}
-GET        /api/atm/admin/tokens/{id}/resolve/{entity_id}     Explain effective permission
+GET        /api/atm/admin/tokens/{id}/resolve/{entity_id}     Explain effective permission (includes effective_hint)
+POST       /api/atm/admin/tokens/{id}/rotate                  Generate a new raw token value (old value immediately invalid)
 GET        /api/atm/admin/tokens/{id}/scope                   List all readable/writable entities
 GET        /api/atm/admin/tokens/{id}/stats                   Request counters
 GET        /api/atm/admin/tokens/{id}/audit                   Audit log for one token

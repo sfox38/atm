@@ -80,6 +80,7 @@ export const api = {
   patchToken: (id: string, body: PatchTokenBody) =>
     req<TokenRecord>("PATCH", `/tokens/${id}`, body),
   revokeToken: (id: string) => req<void>("DELETE", `/tokens/${id}`),
+  rotateToken: (id: string) => req<TokenCreateResponse>("POST", `/tokens/${id}/rotate`),
 
   listArchivedTokens: () => req<ArchivedTokenRecord[]>("GET", "/tokens/archived"),
   deleteArchivedToken: (id: string) => req<void>("DELETE", `/tokens/archived/${id}`),

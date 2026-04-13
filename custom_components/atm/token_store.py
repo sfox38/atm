@@ -105,6 +105,7 @@ class TokenRecord:
     allow_config_read: bool = False
     allow_template_render: bool = False
     allow_restart: bool = False
+    allow_service_response: bool = False
     permissions: PermissionTree = field(default_factory=PermissionTree)
 
     def to_dict(self) -> dict:
@@ -123,6 +124,7 @@ class TokenRecord:
             "allow_config_read": self.allow_config_read,
             "allow_template_render": self.allow_template_render,
             "allow_restart": self.allow_restart,
+            "allow_service_response": self.allow_service_response,
             "permissions": self.permissions.to_dict(),
         }
 
@@ -149,6 +151,7 @@ class TokenRecord:
             allow_config_read=data.get("allow_config_read", False),
             allow_template_render=data.get("allow_template_render", False),
             allow_restart=data.get("allow_restart", False),
+            allow_service_response=data.get("allow_service_response", False),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
         )
 
@@ -380,7 +383,6 @@ class TokenStore:
         token = self._tokens.pop(token_id, None)
         if token is None:
             return None
-        token.revoked = True
         archived = ArchivedTokenRecord(
             id=token.id,
             name=token.name,
@@ -418,6 +420,7 @@ class TokenStore:
             "allow_config_read",
             "allow_template_render",
             "allow_restart",
+            "allow_service_response",
         }
         for key, value in kwargs.items():
             if key in mutable_fields:
@@ -456,6 +459,8 @@ class TokenStore:
         token = self._tokens.get(token_id)
         if token is None:
             return None
+        if node_type not in ("domains", "devices", "entities"):
+            return None
         collection = getattr(token.permissions, node_type, None)
         if collection is None:
             return None
@@ -488,6 +493,21 @@ class TokenStore:
             del self._archived[token_id]
             await self.async_save()
         return True
+
+    async def async_rotate_token(self, token_id: str) -> tuple[TokenRecord, str] | None:
+        """Replace the token hash with a freshly generated value and persist.
+
+        Returns (updated_record, raw_token) on success, or None if the token is not found.
+        The raw token is returned exactly once and never stored. Callers must pass it to
+        the client immediately and discard it.
+        """
+        token = self._tokens.get(token_id)
+        if token is None:
+            return None
+        raw_token = TOKEN_PREFIX + secrets.token_hex(TOKEN_HEX_LENGTH // 2)
+        token.token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        await self.async_save()
+        return token, raw_token
 
     def get_settings(self) -> GlobalSettings:
         return self._settings

@@ -8,7 +8,7 @@ interface Props {
 }
 
 const FLAGS: {
-  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_config_read" | "allow_template_render">;
+  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_config_read" | "allow_template_render" | "allow_service_response">;
   label: string;
   description: string;
   alwaysShown?: boolean;
@@ -33,6 +33,11 @@ const FLAGS: {
     key: "allow_template_render",
     label: "Allow template render",
     description: "Permits rendering Jinja2 templates via the template endpoint.",
+  },
+  {
+    key: "allow_service_response",
+    label: "Allow service response data",
+    description: "When enabled, service calls return response data for services that support it (e.g. conversation.process).",
   },
 ];
 

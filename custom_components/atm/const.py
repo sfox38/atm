@@ -25,11 +25,11 @@ DEFAULT_RATE_LIMIT_BURST = 10
 SSE_HEARTBEAT_INTERVAL = datetime.timedelta(seconds=15)
 FLUSH_INTERVAL = datetime.timedelta(minutes=5)
 EXPIRY_CHECK_INTERVAL = datetime.timedelta(minutes=1)
+SENSOR_PUSH_INTERVAL = datetime.timedelta(hours=1)
 
 AUDIT_LOG_MAXLEN = 10000
 AUDIT_STORAGE_KEY = "atm_audit"
 AUDIT_STORAGE_VERSION = 1
-AUDIT_FLUSH_INTERVAL_DEFAULT = 15  # minutes; 0 = never
 
 SENSITIVE_ATTRIBUTES = frozenset({
     "entity_picture",

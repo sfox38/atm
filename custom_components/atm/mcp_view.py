@@ -48,17 +48,20 @@ from .policy_engine import (
     Permission,
     filter_entities_for_token,
     filter_service_response,
+    get_effective_hint,
     resolve,
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
+    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
 
 _LOGGER = logging.getLogger(__name__)
 
-_MCP_VERSION = "2024-11-05"
+_MCP_VERSION_SSE = "2024-11-05"
+_MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
@@ -403,6 +406,8 @@ async def _tool_call_service(
     device_id = args.get("device_id")
     area_id = args.get("area_id")
     service_data = args.get("service_data") or {}
+    if not isinstance(service_data, dict):
+        service_data = {}
 
     try:
         permitted_entities = resolve_service_targets(
@@ -428,6 +433,18 @@ async def _tool_call_service(
     call_data = dict(service_data)
     call_data["entity_id"] = permitted_entities
 
+    use_return_response = False
+    if token.allow_service_response:
+        try:
+            from homeassistant.core import SupportsResponse as _SR
+            handler = hass.services.async_services().get(domain, {}).get(service)
+            use_return_response = (
+                handler is not None and
+                getattr(handler, "supports_response", None) not in (None, _SR.NONE)
+            )
+        except Exception:
+            pass
+
     try:
         async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
             svc_response = await hass.services.async_call(
@@ -435,7 +452,7 @@ async def _tool_call_service(
                 service,
                 call_data,
                 blocking=True,
-                return_response=False,
+                return_response=use_return_response,
             )
     except asyncio.TimeoutError:
         return (
@@ -527,30 +544,7 @@ async def _tool_render_template(
             "is_state": _is_state,
             "is_state_attr": _is_state_attr,
             "has_value": _has_value,
-            # Block entity-enumeration HA globals that bypass ATM permission filtering.
-            # Jinja2 local variables shadow globals of the same name.
-            "integration_entities": lambda *a, **kw: [],
-            "area_entities": lambda *a, **kw: [],
-            "area_devices": lambda *a, **kw: [],
-            "device_entities": lambda *a, **kw: [],
-            "expand": lambda *a, **kw: [],
-            "label_entities": lambda *a, **kw: [],
-            "label_areas": lambda *a, **kw: [],
-            "floor_entities": lambda *a, **kw: [],
-            "floor_areas": lambda *a, **kw: [],
-            # Block topology-enumeration globals that reveal unpermitted instance structure.
-            "device_attr": lambda *a, **kw: None,
-            "device_id": lambda *a, **kw: None,
-            "areas": lambda *a, **kw: [],
-            "labels": lambda *a, **kw: [],
-            "label_id": lambda *a, **kw: None,
-            "label_name": lambda *a, **kw: None,
-            "floors": lambda *a, **kw: [],
-            "floor_id": lambda *a, **kw: None,
-            "floor_name": lambda *a, **kw: None,
-            "closest": lambda *a, **kw: None,
-            "is_device_attr": lambda *a, **kw: False,
-            "area_id": lambda *a, **kw: None,
+            **template_blocklist_vars(),
         })
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
@@ -643,7 +637,7 @@ def _resolve_area_id(entry: Any, device_registry: Any) -> str | None:
     return None
 
 
-def _build_server_info(token: TokenRecord, hass: Any) -> dict:
+def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
     """Build the atm://server-info resource payload for the MCP resources/read endpoint."""
     states = hass.states.async_all()
     if token.pass_through:
@@ -651,12 +645,6 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
     else:
         filtered = filter_entities_for_token(states, token, hass)
         count = len(filtered)
-
-    base_url = ""
-    try:
-        base_url = str(hass.config.internal_url or hass.config.external_url or "")
-    except Exception:
-        pass
 
     return {
         "name": "ATM Scoped Proxy",
@@ -673,28 +661,6 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
     }
 
-
-def _get_effective_hint(token: TokenRecord, entity_id: str, hass: Any) -> str | None:
-    """Return the most specific hint for an entity, checking entity then device then domain nodes."""
-    registry = er.async_get(hass)
-    entry = registry.async_get(entity_id)
-    permissions = token.permissions
-
-    entity_node = permissions.entities.get(entity_id)
-    if entity_node and entity_node.hint:
-        return entity_node.hint
-
-    if entry and entry.device_id:
-        device_node = permissions.devices.get(entry.device_id)
-        if device_node and device_node.hint:
-            return device_node.hint
-
-    domain = entity_id.split(".")[0]
-    domain_node = permissions.domains.get(domain)
-    if domain_node and domain_node.hint:
-        return domain_node.hint
-
-    return None
 
 
 def _build_context_plain(token: TokenRecord, hass: Any) -> str:
@@ -716,9 +682,9 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm == Permission.WRITE:
-                accessible.append((state.entity_id, "READ/WRITE", _get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ/WRITE", get_effective_hint(token, state.entity_id, hass)))
             elif perm == Permission.READ:
-                accessible.append((state.entity_id, "READ", _get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ", get_effective_hint(token, state.entity_id, hass)))
 
         accessible.sort(key=lambda x: x[0])
         lines.append("You have access to the following Home Assistant entities:")
@@ -779,7 +745,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             area_id = _resolve_area_id(entry, dev_registry)
             perm_str = "READ/WRITE" if perm == Permission.WRITE else "READ"
             e: dict = {"entity_id": state.entity_id, "permission": perm_str, "area_id": area_id}
-            hint = _get_effective_hint(token, state.entity_id, hass)
+            hint = get_effective_hint(token, state.entity_id, hass)
             if hint:
                 e["hint"] = hint
             entities.append(e)
@@ -811,17 +777,20 @@ async def _dispatch_mcp(
     hass: Any,
     data: ATMData,
     client_ip: str,
+    protocol_version: str = _MCP_VERSION_SSE,
+    base_url: str,
 ) -> tuple[dict | None, str, str, str]:
     """Dispatch one MCP method call.
 
     Returns (response_msg, log_method, log_resource, outcome).
     response_msg is None for notifications that require no response.
+    protocol_version is returned in initialize responses to reflect the active transport.
     """
     request_id = generate_request_id()
 
     if method == "initialize":
         resp = _jsonrpc_result(msg_id, {
-            "protocolVersion": _MCP_VERSION,
+            "protocolVersion": protocol_version,
             "capabilities": {
                 "tools": {},
                 "resources": {"subscribe": False},
@@ -883,7 +852,7 @@ async def _dispatch_mcp(
                      resource=uri or "/api/atm/mcp", outcome="denied", client_ip=client_ip)
                 return _jsonrpc_error(msg_id, -32602, "Unknown resource URI."), "resources/read", uri, "denied"
             return None, "resources/read", uri, "denied"
-        server_info = _build_server_info(token, hass)
+        server_info = _build_server_info(token, hass, base_url)
         resp = _jsonrpc_result(msg_id, {
             "contents": [{
                 "uri": "atm://server-info",
@@ -897,10 +866,76 @@ async def _dispatch_mcp(
 
     if msg_id is not None:
         _log(data, token, request_id=request_id, method=method or "unknown",
-             resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
-        return _jsonrpc_error(msg_id, -32601, "Method not found."), method or "unknown", "/api/atm/mcp", "denied"
+             resource="/api/atm/mcp", outcome="not_implemented", client_ip=client_ip)
+        return _jsonrpc_error(msg_id, -32601, "Method not found."), method or "unknown", "/api/atm/mcp", "not_implemented"
 
-    return None, method or "unknown", "/api/atm/mcp", "denied"
+    return None, method or "unknown", "/api/atm/mcp", "not_implemented"
+
+
+async def _handle_streamable_batch(
+    items: list,
+    token: TokenRecord,
+    rl_result: RateLimitResult,
+    hass: Any,
+    data: ATMData,
+    request_id: str,
+    client_ip: str,
+    base_url: str,
+) -> web.Response:
+    """Dispatch a JSON-RPC batch array per MCP 2025-03-26.
+
+    Each item is dispatched independently. Failed items produce per-item error objects
+    rather than failing the whole batch. Notifications (no id) produce no response entry.
+    Returns 202 when all items are notifications; 200 with a results array otherwise.
+    """
+    if not items:
+        return web.Response(
+            status=400,
+            content_type="application/json",
+            text=json.dumps(_jsonrpc_error(None, -32600, "Empty batch.")),
+            headers={"X-ATM-Request-ID": request_id},
+        )
+
+    async def _dispatch_one(item: Any) -> dict | None:
+        if not isinstance(item, dict) or item.get("jsonrpc") != "2.0":
+            msg_id = item.get("id") if isinstance(item, dict) else None
+            return _jsonrpc_error(msg_id, -32600, "Invalid Request.")
+        msg_id = item.get("id")
+        method = item.get("method", "")
+        params = item.get("params") or {}
+        response_msg, _, _, _ = await _dispatch_mcp(
+            method, msg_id, params, token, hass, data, client_ip,
+            protocol_version=_MCP_VERSION_STREAMABLE,
+            base_url=base_url,
+        )
+        return response_msg
+
+    raw_results = await asyncio.gather(
+        *[_dispatch_one(item) for item in items],
+        return_exceptions=True,
+    )
+
+    responses = []
+    for r in raw_results:
+        if isinstance(r, Exception):
+            responses.append(_jsonrpc_error(None, -32603, "Internal error."))
+        elif r is not None:
+            responses.append(r)
+
+    if not responses:
+        return web.Response(status=202, headers={"X-ATM-Request-ID": request_id})
+
+    resp = web.Response(
+        status=200,
+        content_type="application/json",
+        text=json.dumps(responses, default=str),
+        headers={"X-ATM-Request-ID": request_id},
+    )
+    if token.rate_limit_requests > 0:
+        resp.headers["X-RateLimit-Limit"] = str(token.rate_limit_requests)
+        resp.headers["X-RateLimit-Remaining"] = str(rl_result.remaining)
+        resp.headers["X-RateLimit-Reset"] = str(rl_result.reset)
+    return resp
 
 
 class ATMMcpSseView(HomeAssistantView):
@@ -958,6 +993,8 @@ class ATMMcpSseView(HomeAssistantView):
                  outcome="rate_limited", client_ip=client_ip)
             return _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
 
+        data.store.update_last_used(token.id, utcnow())
+
         rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
         if not rl_result.allowed:
             _fire_rate_limit_events(hass, data, token)
@@ -966,8 +1003,6 @@ class ATMMcpSseView(HomeAssistantView):
             resp = _error("rate_limited", "Rate limit exceeded.", 429, request_id)
             resp.headers["Retry-After"] = str(rl_result.retry_after)
             return resp
-
-        data.store.update_last_used(token.id, utcnow())
         _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
              outcome="allowed", client_ip=client_ip)
 
@@ -1047,11 +1082,29 @@ class ATMMcpSseView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        body_result = await _read_json_body(request, request_id)
-        if isinstance(body_result, web.Response):
-            return body_result
-        body = body_result
+        from .const import MAX_REQUEST_BODY_BYTES as _MAX_BODY
+        if request.content_length is not None and request.content_length > _MAX_BODY:
+            return _error("request_too_large", "Request body too large.", 413, request_id)
+        try:
+            body_bytes = await request.read()
+        except Exception:
+            return _error("invalid_request", "Failed to read request body.", 400, request_id)
+        if len(body_bytes) > _MAX_BODY:
+            return _error("request_too_large", "Request body too large.", 413, request_id)
+        if not body_bytes:
+            return _error("invalid_request", "Empty request body.", 400, request_id)
+        try:
+            parsed = json.loads(body_bytes)
+        except json.JSONDecodeError:
+            return _error("invalid_request", "Invalid JSON body.", 400, request_id)
 
+        if isinstance(parsed, list):
+            return await _handle_streamable_batch(parsed, token, rl_result, hass, data, request_id, client_ip, base_url=str(request.url.origin()))
+
+        if not isinstance(parsed, dict):
+            return _error("invalid_request", "Request body must be a JSON object or array.", 400, request_id)
+
+        body = parsed
         if body.get("jsonrpc") != "2.0":
             return web.Response(
                 status=400,
@@ -1065,7 +1118,9 @@ class ATMMcpSseView(HomeAssistantView):
         params = body.get("params") or {}
 
         response_msg, _log_method, _log_resource, _outcome = await _dispatch_mcp(
-            method, msg_id, params, token, hass, data, client_ip
+            method, msg_id, params, token, hass, data, client_ip,
+            protocol_version=_MCP_VERSION_STREAMABLE,
+            base_url=str(request.url.origin()),
         )
 
         if response_msg is None:
@@ -1134,7 +1189,9 @@ class ATMMcpMessagesView(HomeAssistantView):
         params = body.get("params") or {}
 
         response_msg, _log_method, _log_resource, _outcome = await _dispatch_mcp(
-            method, msg_id, params, token, hass, data, client_ip
+            method, msg_id, params, token, hass, data, client_ip,
+            protocol_version=_MCP_VERSION_SSE,
+            base_url=str(request.url.origin()),
         )
 
         if response_msg is not None:
