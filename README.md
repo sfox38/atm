@@ -281,7 +281,7 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 | Kill switch | Off | When on, proxy and MCP routes are unregistered entirely |
 | Disable all logging | Off | Suppresses all auditing |
 | Log allowed requests | On | Record successful requests |
-| Log denied requests | On | Record blocked requests |
+| Log denied requests | On | Record blocked requests and unsupported MCP method calls |
 | Log rate-limited requests | On | Record rate-limited requests |
 | Log entity names | On | Include entity IDs in audit entries |
 | Log client IP | On | Include caller IP in audit entries |
@@ -295,9 +295,11 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 
 ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings.
 
-Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, or `rate_limited`), and client IP.
+Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome (`allowed`, `denied`, `not_found`, `rate_limited`, or `not_implemented`), and client IP.
 
 `not_found` is recorded when an entity is genuinely absent from both HA state and the entity registry. From the caller's perspective it looks identical to `denied`, but the audit log distinguishes them so you can tell whether a token is hitting a missing entity or a permission wall.
+
+`not_implemented` is recorded when an MCP client calls a method that ATM does not support (for example, `resources/templates/list`). This is a protocol-level gap, not a permission block, and does not increment the token's denied counter.
 
 ### Persistence
 
