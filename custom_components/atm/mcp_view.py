@@ -778,7 +778,7 @@ async def _dispatch_mcp(
     data: ATMData,
     client_ip: str,
     protocol_version: str = _MCP_VERSION_SSE,
-    base_url: str = "",
+    base_url: str,
 ) -> tuple[dict | None, str, str, str]:
     """Dispatch one MCP method call.
 
@@ -880,7 +880,7 @@ async def _handle_streamable_batch(
     data: ATMData,
     request_id: str,
     client_ip: str,
-    base_url: str = "",
+    base_url: str,
 ) -> web.Response:
     """Dispatch a JSON-RPC batch array per MCP 2025-03-26.
 
@@ -993,6 +993,8 @@ class ATMMcpSseView(HomeAssistantView):
                  outcome="rate_limited", client_ip=client_ip)
             return _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
 
+        data.store.update_last_used(token.id, utcnow())
+
         rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
         if not rl_result.allowed:
             _fire_rate_limit_events(hass, data, token)
@@ -1001,8 +1003,6 @@ class ATMMcpSseView(HomeAssistantView):
             resp = _error("rate_limited", "Rate limit exceeded.", 429, request_id)
             resp.headers["Retry-After"] = str(rl_result.retry_after)
             return resp
-
-        data.store.update_last_used(token.id, utcnow())
         _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
              outcome="allowed", client_ip=client_ip)
 

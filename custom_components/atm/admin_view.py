@@ -16,11 +16,10 @@ from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
-from .policy_engine import get_effective_hint
 from .data import ATMData
-from .helpers import terminate_token_connections, token_name_slug
-from .policy_engine import Permission, filter_entities_for_token, resolve
-from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES
+from .helpers import terminate_token_connections
+from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
+from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES, token_name_slug
 
 _LOGGER = logging.getLogger(__name__)
 
