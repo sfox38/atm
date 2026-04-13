@@ -92,19 +92,48 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 
 ### Available MCP tools
 
+ATM is a drop-in replacement for the native HA MCP server. It exposes all 20 native HA MCP tools plus ATM-specific tools for direct entity access and system operations.
+
+**Native HA MCP tools** - functionally identical to the native HA MCP server, scoped to the token's permission tree:
+
+| Tool | Description |
+|---|---|
+| `GetLiveContext` | YAML snapshot of accessible entity states |
+| `GetDateTime` | Current date, time, and timezone |
+| `HassTurnOn` / `HassTurnOff` | Turn devices on or off by area, name, floor, or domain |
+| `HassLightSet` | Set light brightness, color, or color temperature |
+| `HassFanSetSpeed` | Set fan speed |
+| `HassClimateSetTemperature` | Set climate device target temperature |
+| `HassSetPosition` | Set position of covers or similar devices |
+| `HassSetVolume` / `HassSetVolumeRelative` | Set or adjust media player volume |
+| `HassMediaPause` / `HassMediaUnpause` | Pause or resume media playback |
+| `HassMediaNext` / `HassMediaPrevious` | Skip tracks on a media player |
+| `HassMediaSearchAndPlay` | Search and play media |
+| `HassMediaPlayerMute` / `HassMediaPlayerUnmute` | Mute or unmute a media player |
+| `HassCancelAllTimers` | Cancel all timers in an area |
+| `HassStopMoving` | Stop a moving cover or device |
+
+**ATM entity tools** - direct entity access filtered by permission tree:
+
 | Tool | Requires flag |
 |---|---|
 | `get_state` - current state of one entity | none |
 | `get_states` - all accessible entity states | none |
-| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`, capped at 7 days) | none |
+| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`) | none |
 | `get_statistics` - long-term statistics for numeric entities | none |
-| `call_service` - call a HA service | none |
+| `call_service` - call a HA service by domain and service name | none |
+
+**System tools** - gated by capability flags:
+
+| Tool | Requires flag |
+|---|---|
 | `render_template` - render a Jinja2 template | `allow_template_render` |
 | `get_config` - HA configuration info | `allow_config_read` |
 | `restart_ha` - restart Home Assistant | `allow_restart` |
+| `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
 | `create_automation`, `edit_automation`, `delete_automation` | `allow_automation_write` (returns a not-implemented error in v1) |
 
-Claude can only see and act on entities within the token's permission scope.
+Claude can only see and act on entities within the token's permission scope. Native tools silently skip inaccessible entities without revealing they exist.
 
 ---
 
@@ -176,13 +205,14 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 
 | Flag | What it enables |
 |---|---|
-| `allow_restart` | `homeassistant.restart` and `homeassistant.stop` |
-| `allow_config_read` | Reading HA configuration data |
-| `allow_template_render` | Rendering Jinja2 templates |
+| `allow_restart` | `homeassistant.restart` and `homeassistant.stop`. Applies even in pass-through mode. |
+| `allow_config_read` | Reading HA configuration data and the event bus listener list |
+| `allow_template_render` | Rendering Jinja2 templates (permission-scoped environment) |
 | `allow_automation_write` | Automation management (returns a not-implemented error in v1) |
 | `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. |
+| `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices. Pass-through tokens bypass this flag. |
 
-`allow_restart` is the one exception to pass-through mode's wide access. Even a pass-through token cannot restart HA without this flag explicitly set.
+`allow_restart` is the one capability flag that pass-through mode does not bypass. All other flags, including `allow_broadcast`, are bypassed by pass-through tokens.
 
 ---
 

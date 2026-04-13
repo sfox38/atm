@@ -7,12 +7,14 @@ import functools
 import hashlib
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
@@ -26,6 +28,7 @@ from .const import (
     HIGH_RISK_DOMAINS,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     PROXY_TIMEOUT_SECONDS,
+    SENSITIVE_ATTRIBUTES,
     SSE_HEARTBEAT_INTERVAL,
     TOKEN_LENGTH,
     TOKEN_PREFIX,
@@ -50,6 +53,7 @@ from .policy_engine import (
     filter_service_response,
     get_effective_hint,
     resolve,
+    resolve_intent_entities,
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
@@ -207,6 +211,272 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "description": "Restart Home Assistant.",
         "flag": "allow_restart",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "HassBroadcast",
+        "description": "Broadcast a message through the home",
+        "flag": "allow_broadcast",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+            },
+            "required": ["message"],
+        },
+    },
+]
+
+_NATIVE_TOOL_DEFS: list[dict] = [
+    {
+        "name": "GetLiveContext",
+        "description": (
+            "Provides real-time information about the CURRENT state, value, or mode of devices, "
+            "sensors, entities, or areas. Use this tool for: 1. Answering questions about current "
+            "conditions (e.g., 'Is the light on?'). 2. As the first step in conditional actions "
+            "(e.g., 'If the weather is rainy, turn off sprinklers' requires checking the weather first)."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "GetDateTime",
+        "description": "Provides the current date and time.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "HassTurnOn",
+        "description": "Turns on/opens/presses a device or entity. For locks, this performs a 'lock' action. Use for requests like 'turn on', 'activate', 'enable', or 'lock'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassTurnOff",
+        "description": "Turns off/closes a device or entity. For locks, this performs an 'unlock' action. Use for requests like 'turn off', 'deactivate', 'disable', or 'unlock'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassLightSet",
+        "description": "Sets the brightness percentage or color of a light",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+                "brightness": {"type": "integer", "minimum": 0, "maximum": 100, "description": "The brightness percentage of the light between 0 and 100, where 0 is off and 100 is fully lit"},
+                "color": {"type": "string"},
+                "temperature": {"type": "integer", "minimum": 0},
+            },
+        },
+    },
+    {
+        "name": "HassFanSetSpeed",
+        "description": "Sets a fan's speed by percentage",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["fan"]}},
+                "percentage": {"type": "integer", "minimum": 0, "maximum": 100, "description": "The speed percentage of the fan"},
+            },
+        },
+    },
+    {
+        "name": "HassClimateSetTemperature",
+        "description": "Sets the target temperature of a climate device or entity",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "temperature": {"type": "number"},
+            },
+        },
+    },
+    {
+        "name": "HassSetPosition",
+        "description": "Sets the position of a device or entity",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+                "position": {"type": "integer", "minimum": 0, "maximum": 100},
+            },
+        },
+    },
+    {
+        "name": "HassSetVolume",
+        "description": "Sets the volume percentage of a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+                "volume_level": {"type": "integer", "minimum": 0, "maximum": 100, "description": "The volume percentage of the media player"},
+            },
+        },
+    },
+    {
+        "name": "HassSetVolumeRelative",
+        "description": "Increases or decreases the volume of a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "volume_step": {"anyOf": [{"type": "string", "enum": ["up", "down"]}, {"type": "integer", "minimum": -100, "maximum": 100}]},
+            },
+        },
+    },
+    {
+        "name": "HassMediaPause",
+        "description": "Pauses a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassMediaUnpause",
+        "description": "Resumes a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassMediaNext",
+        "description": "Skips a media player to the next item",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassMediaPrevious",
+        "description": "Replays the previous item for a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassMediaSearchAndPlay",
+        "description": "Searches for media and plays the first result",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "search_query": {"type": "string"},
+                "media_class": {"type": "string", "enum": ["album", "app", "artist", "channel", "composer", "contributing_artist", "directory", "episode", "game", "genre", "image", "movie", "music", "playlist", "podcast", "season", "track", "tv_show", "url", "video"]},
+            },
+        },
+    },
+    {
+        "name": "HassMediaPlayerMute",
+        "description": "Mutes a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassMediaPlayerUnmute",
+        "description": "Unmutes a media player",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string", "enum": ["media_player"]}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "HassCancelAllTimers",
+        "description": "Cancels all timers",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "area": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "HassStopMoving",
+        "description": "Stops a moving device or entity",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "floor": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+                "device_class": {"type": "array", "items": {"type": "string"}},
+            },
+        },
     },
 ]
 
@@ -595,6 +865,498 @@ async def _tool_restart_ha(
     return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
 
 
+_YAML_RESERVED: frozenset[str] = frozenset({
+    "true", "false", "yes", "no", "on", "off", "null", "~",
+})
+_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+_LIVE_CONTEXT_ATTRS: tuple[str, ...] = (
+    "unit_of_measurement",
+    "device_class",
+    "brightness",
+    "volume_level",
+    "media_title",
+    "current_temperature",
+    "temperature",
+    "current_position",
+    "percentage",
+)
+
+
+def _yaml_scalar(value: Any) -> str:
+    """Format a state or attribute value as a YAML scalar string."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return f"'{value}'"
+    if isinstance(value, int):
+        return f"'{value}'"
+    if isinstance(value, float):
+        return str(value)
+    s = str(value)
+    if not s:
+        return "''"
+    if s.lower() in _YAML_RESERVED:
+        return f"'{s}'"
+    try:
+        int(s)
+        return f"'{s}'"
+    except ValueError:
+        pass
+    if _DATE_PREFIX_RE.match(s):
+        return f"'{s}'"
+    return s
+
+
+def _build_live_context(token: TokenRecord, hass: Any) -> str:
+    """Build a GetLiveContext-format YAML-like summary of accessible entities."""
+    registry = er.async_get(hass)
+    dr_inst = dr.async_get(hass)
+    ar_inst = ar.async_get(hass)
+    area_names: dict[str, str] = {a.id: a.name for a in ar_inst.async_list_areas()}
+
+    states = hass.states.async_all()
+    if token.pass_through:
+        accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
+    else:
+        accessible = [
+            s for s in states
+            if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
+        ]
+
+    accessible.sort(key=lambda s: (s.attributes.get("friendly_name") or s.entity_id).lower())
+
+    lines = ["Live Context: An overview of the areas and the devices in this smart home:"]
+    for state in accessible:
+        friendly_name = state.attributes.get("friendly_name") or state.entity_id
+        domain = state.entity_id.split(".")[0]
+        lines.append(f"- names: {friendly_name}")
+        lines.append(f"  domain: {domain}")
+        lines.append(f"  state: {_yaml_scalar(state.state)}")
+
+        entry = registry.async_get(state.entity_id)
+        area_id = None
+        if entry:
+            if entry.area_id:
+                area_id = entry.area_id
+            elif entry.device_id:
+                device = dr_inst.async_get(entry.device_id)
+                if device and device.area_id:
+                    area_id = device.area_id
+        if area_id and area_id in area_names:
+            lines.append(f"  areas: {area_names[area_id]}")
+
+        attr_lines: list[str] = []
+        for attr_key in _LIVE_CONTEXT_ATTRS:
+            if attr_key in state.attributes and attr_key not in SENSITIVE_ATTRIBUTES:
+                val = state.attributes[attr_key]
+                attr_lines.append(f"    {attr_key}: {_yaml_scalar(val)}")
+        if attr_lines:
+            lines.append("  attributes:")
+            lines.extend(attr_lines)
+
+    return "\n".join(lines)
+
+
+async def _tool_get_live_context(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: GetLiveContext - return a human-readable summary of accessible entities."""
+    text = _build_live_context(token, hass)
+    return _tool_success(json.dumps({"success": True, "result": text})), "allowed", "GetLiveContext"
+
+
+async def _tool_get_date_time(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: GetDateTime - return the current local date and time."""
+    from homeassistant.util.dt import now as ha_now
+    local = ha_now()
+    offset = local.strftime("%z")
+    sign = offset[0]
+    hours = int(offset[1:3])
+    mins = int(offset[3:5])
+    tz_str = f"{sign}{hours:02d}" if mins == 0 else f"{sign}{hours:02d}:{mins:02d}"
+    result = {
+        "date": local.strftime("%Y-%m-%d"),
+        "time": local.strftime("%H:%M:%S"),
+        "timezone": tz_str,
+        "weekday": local.strftime("%A"),
+    }
+    return _tool_success(json.dumps({"success": True, "result": result})), "allowed", "GetDateTime"
+
+
+def _area_id_from_name(hass: Any, area_name: str) -> str:
+    """Return the area registry ID for a given area name, falling back to the name itself."""
+    ar_inst = ar.async_get(hass)
+    for a in ar_inst.async_list_areas():
+        if a.name.lower() == area_name.lower() or a.id == area_name:
+            return a.id
+    return area_name
+
+
+def _build_target_context(args: dict, hass: Any) -> list[dict]:
+    """Build the leading context entries for the native HA action response."""
+    area = args.get("area")
+    floor = args.get("floor")
+    if area:
+        return [{"name": area, "type": "area", "id": _area_id_from_name(hass, area)}]
+    if floor:
+        return [{"name": floor, "type": "floor", "id": floor}]
+    return []
+
+
+async def _tool_intent_action(
+    tool_name: str,
+    service_domain: str,
+    service_name: str,
+    service_data: dict,
+    entities: list[str],
+    hass: Any,
+    args: dict | None = None,
+) -> tuple[dict, str, str]:
+    """Execute a service call on pre-resolved, permission-filtered entity list."""
+    if not entities:
+        return _tool_error("No accessible entities matched your request."), "denied", tool_name
+    call_data = dict(service_data)
+    call_data["entity_id"] = entities
+    try:
+        async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+            await hass.services.async_call(
+                service_domain,
+                service_name,
+                call_data,
+                blocking=True,
+                return_response=False,
+            )
+    except asyncio.TimeoutError:
+        return (
+            _tool_success(json.dumps({"success": True, "partial": True, "message": "Action dispatched."})),
+            "allowed",
+            tool_name,
+        )
+    except (ServiceNotFound, HomeAssistantError):
+        return _tool_error("Service call failed."), "denied", tool_name
+
+    success: list[dict] = _build_target_context(args or {}, hass)
+    for entity_id in entities:
+        state = hass.states.get(entity_id)
+        name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+        success.append({"name": name, "type": "entity", "id": entity_id})
+
+    return _tool_success(json.dumps({
+        "speech": {},
+        "response_type": "action_done",
+        "data": {"success": success, "failed": []},
+    })), "allowed", tool_name
+
+
+async def _tool_hass_turn_on(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=args.get("domain"),
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassTurnOn", "homeassistant", "turn_on", {}, entities, hass, args=args)
+
+
+async def _tool_hass_turn_off(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=args.get("domain"),
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassTurnOff", "homeassistant", "turn_off", {}, entities, hass, args=args)
+
+
+async def _tool_hass_light_set(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    domains = args.get("domain") or ["light"]
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=domains,
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    service_data: dict[str, Any] = {}
+    if "brightness" in args and args["brightness"] is not None:
+        service_data["brightness_pct"] = args["brightness"]
+    if "color" in args and args["color"] is not None:
+        service_data["color_name"] = args["color"]
+    if "temperature" in args and args["temperature"] is not None:
+        service_data["color_temp_kelvin"] = args["temperature"]
+    return await _tool_intent_action("HassLightSet", "light", "turn_on", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_fan_set_speed(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["fan"],
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    service_data: dict[str, Any] = {}
+    if "percentage" in args and args["percentage"] is not None:
+        service_data["percentage"] = args["percentage"]
+    return await _tool_intent_action("HassFanSetSpeed", "fan", "set_percentage", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_climate_set_temperature(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["climate"],
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    service_data: dict[str, Any] = {}
+    if "temperature" in args and args["temperature"] is not None:
+        service_data["temperature"] = args["temperature"]
+    return await _tool_intent_action("HassClimateSetTemperature", "climate", "set_temperature", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_set_position(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=args.get("domain") or ["cover"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    service_data: dict[str, Any] = {}
+    if "position" in args and args["position"] is not None:
+        service_data["position"] = args["position"]
+    return await _tool_intent_action("HassSetPosition", "cover", "set_cover_position", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_set_volume(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    service_data: dict[str, Any] = {}
+    if "volume_level" in args and args["volume_level"] is not None:
+        service_data["volume_level"] = args["volume_level"] / 100.0
+    return await _tool_intent_action("HassSetVolume", "media_player", "volume_set", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_set_volume_relative(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    step = args.get("volume_step")
+    if step == "down" or (isinstance(step, int) and step < 0):
+        svc = "volume_down"
+    else:
+        svc = "volume_up"
+    return await _tool_intent_action("HassSetVolumeRelative", "media_player", svc, {}, entities, hass, args=args)
+
+
+async def _tool_hass_media_pause(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaPause", "media_player", "media_pause", {}, entities, hass, args=args)
+
+
+async def _tool_hass_media_unpause(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, args=args)
+
+
+async def _tool_hass_media_next(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaNext", "media_player", "media_next_track", {}, entities, hass, args=args)
+
+
+async def _tool_hass_media_previous(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
+
+
+async def _tool_hass_media_search_and_play(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    search_query = args.get("search_query", "")
+    media_class = args.get("media_class") or "music"
+    service_data: dict[str, Any] = {
+        "media_content_id": search_query,
+        "media_content_type": media_class,
+    }
+    return await _tool_intent_action("HassMediaSearchAndPlay", "media_player", "play_media", service_data, entities, hass, args=args)
+
+
+async def _tool_hass_media_player_mute(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaPlayerMute", "media_player", "volume_mute", {"is_volume_muted": True}, entities, hass, args=args)
+
+
+async def _tool_hass_media_player_unmute(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["media_player"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassMediaPlayerUnmute", "media_player", "volume_mute", {"is_volume_muted": False}, entities, hass, args=args)
+
+
+async def _tool_hass_cancel_all_timers(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=["timer"],
+        area=args.get("area"),
+    )
+    return await _tool_intent_action("HassCancelAllTimers", "timer", "cancel", {}, entities, hass, args=args)
+
+
+async def _tool_hass_stop_moving(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    entities = resolve_intent_entities(
+        hass, token,
+        domains=args.get("domain") or ["cover"],
+        device_classes=args.get("device_class"),
+        name=args.get("name"),
+        area=args.get("area"),
+        floor=args.get("floor"),
+    )
+    return await _tool_intent_action("HassStopMoving", "cover", "stop_cover", {}, entities, hass, args=args)
+
+
+async def _tool_hass_broadcast(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: HassBroadcast - announce a message via assist satellite devices."""
+    if not token.allow_broadcast and not token.pass_through:
+        return _tool_error("Forbidden. The allow_broadcast flag must be enabled on this token."), "denied", "HassBroadcast"
+
+    message = args.get("message", "")
+    if not message:
+        return _tool_error("Missing required argument: message"), "invalid_request", "HassBroadcast"
+
+    _ANNOUNCE_BIT = 2
+    targets: list[str] = []
+    for state in hass.states.async_all():
+        if state.entity_id.split(".")[0] != "assist_satellite":
+            continue
+        features = state.attributes.get("supported_features", 0)
+        if isinstance(features, int) and (features & _ANNOUNCE_BIT):
+            if token.pass_through or resolve(state.entity_id, token, hass) == Permission.WRITE:
+                targets.append(state.entity_id)
+
+    if not targets:
+        return _tool_error("No accessible broadcast devices found."), "denied", "HassBroadcast"
+
+    try:
+        async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+            await hass.services.async_call(
+                "assist_satellite",
+                "announce",
+                {"message": message, "entity_id": targets},
+                blocking=True,
+                return_response=False,
+            )
+    except asyncio.TimeoutError:
+        return (
+            _tool_success(json.dumps({"success": True, "partial": True, "message": "Broadcast dispatched."})),
+            "allowed",
+            "HassBroadcast",
+        )
+    except (ServiceNotFound, HomeAssistantError):
+        return _tool_error("Broadcast failed. No compatible satellite devices found."), "denied", "HassBroadcast"
+
+    return _tool_success(json.dumps({"success": True})), "allowed", "HassBroadcast"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -621,6 +1383,46 @@ async def _call_tool(
         return await _tool_automation_stub(tool_name, arguments, token)
     if tool_name == "restart_ha":
         return await _tool_restart_ha(arguments, token, hass)
+    if tool_name == "GetLiveContext":
+        return await _tool_get_live_context(arguments, token, hass)
+    if tool_name == "GetDateTime":
+        return await _tool_get_date_time(arguments, token, hass)
+    if tool_name == "HassTurnOn":
+        return await _tool_hass_turn_on(arguments, token, hass)
+    if tool_name == "HassTurnOff":
+        return await _tool_hass_turn_off(arguments, token, hass)
+    if tool_name == "HassLightSet":
+        return await _tool_hass_light_set(arguments, token, hass)
+    if tool_name == "HassFanSetSpeed":
+        return await _tool_hass_fan_set_speed(arguments, token, hass)
+    if tool_name == "HassClimateSetTemperature":
+        return await _tool_hass_climate_set_temperature(arguments, token, hass)
+    if tool_name == "HassSetPosition":
+        return await _tool_hass_set_position(arguments, token, hass)
+    if tool_name == "HassSetVolume":
+        return await _tool_hass_set_volume(arguments, token, hass)
+    if tool_name == "HassSetVolumeRelative":
+        return await _tool_hass_set_volume_relative(arguments, token, hass)
+    if tool_name == "HassMediaPause":
+        return await _tool_hass_media_pause(arguments, token, hass)
+    if tool_name == "HassMediaUnpause":
+        return await _tool_hass_media_unpause(arguments, token, hass)
+    if tool_name == "HassMediaNext":
+        return await _tool_hass_media_next(arguments, token, hass)
+    if tool_name == "HassMediaPrevious":
+        return await _tool_hass_media_previous(arguments, token, hass)
+    if tool_name == "HassMediaSearchAndPlay":
+        return await _tool_hass_media_search_and_play(arguments, token, hass)
+    if tool_name == "HassMediaPlayerMute":
+        return await _tool_hass_media_player_mute(arguments, token, hass)
+    if tool_name == "HassMediaPlayerUnmute":
+        return await _tool_hass_media_player_unmute(arguments, token, hass)
+    if tool_name == "HassCancelAllTimers":
+        return await _tool_hass_cancel_all_timers(arguments, token, hass)
+    if tool_name == "HassStopMoving":
+        return await _tool_hass_stop_moving(arguments, token, hass)
+    if tool_name == "HassBroadcast":
+        return await _tool_hass_broadcast(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -656,6 +1458,7 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
             "allow_automation_write": token.allow_automation_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
+            "allow_broadcast": token.allow_broadcast,
         },
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
@@ -706,6 +1509,7 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines.append(f"- Automation write: {'yes' if (token.allow_automation_write or token.pass_through) else 'no'}")
     lines.append(f"- Template render: {'yes' if (token.allow_template_render or token.pass_through) else 'no'}")
     lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
+    lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
     lines.append("")
     if token.rate_limit_requests > 0:
         lines.append(
@@ -761,6 +1565,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             "allow_automation_write": token.allow_automation_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
+            "allow_broadcast": token.allow_broadcast,
         },
         "rate_limit": {
             "requests_per_minute": token.rate_limit_requests,
@@ -813,7 +1618,7 @@ async def _dispatch_mcp(
         return resp, "ping", "/api/atm/mcp", "allowed"
 
     if method == "tools/list":
-        tools = list(_ENTITY_TOOL_DEFS)
+        tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
             flag = tool_def["flag"]
             flag_enabled = token.pass_through or getattr(token, flag, False)

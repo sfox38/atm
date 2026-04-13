@@ -30,6 +30,7 @@ export interface TokenRecord {
   allow_template_render: boolean;
   allow_restart: boolean;
   allow_service_response: boolean;
+  allow_broadcast: boolean;
   permissions: PermissionTree;
 }
 
@@ -153,6 +154,7 @@ export interface PatchTokenBody {
   allow_template_render?: boolean;
   allow_restart?: boolean;
   allow_service_response?: boolean;
+  allow_broadcast?: boolean;
 }
 
 export interface PermissionPatchBody {

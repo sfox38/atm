@@ -105,6 +105,7 @@ class TokenRecord:
     allow_template_render: bool = False
     allow_restart: bool = False
     allow_service_response: bool = False
+    allow_broadcast: bool = False
     permissions: PermissionTree = field(default_factory=PermissionTree)
 
     def to_dict(self) -> dict:
@@ -124,6 +125,7 @@ class TokenRecord:
             "allow_template_render": self.allow_template_render,
             "allow_restart": self.allow_restart,
             "allow_service_response": self.allow_service_response,
+            "allow_broadcast": self.allow_broadcast,
             "permissions": self.permissions.to_dict(),
         }
 
@@ -151,6 +153,7 @@ class TokenRecord:
             allow_template_render=data.get("allow_template_render", False),
             allow_restart=data.get("allow_restart", False),
             allow_service_response=data.get("allow_service_response", False),
+            allow_broadcast=data.get("allow_broadcast", False),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
         )
 
@@ -420,6 +423,7 @@ class TokenStore:
             "allow_template_render",
             "allow_restart",
             "allow_service_response",
+            "allow_broadcast",
         }
         for key, value in kwargs.items():
             if key in mutable_fields:

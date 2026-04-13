@@ -452,7 +452,8 @@ class ATMAdminTokenView(HomeAssistantView):
                 k: v for k, v in body.items()
                 if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
                          "allow_automation_write", "allow_config_read",
-                         "allow_template_render", "allow_restart", "allow_service_response")
+                         "allow_template_render", "allow_restart", "allow_service_response",
+                         "allow_broadcast")
             }
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
@@ -753,6 +754,7 @@ class ATMAdminScopeView(HomeAssistantView):
                 "allow_automation_write": token.allow_automation_write,
                 "allow_template_render": token.allow_template_render,
                 "allow_restart": token.allow_restart,
+                "allow_broadcast": token.allow_broadcast,
             },
         }, request_id=rid)
 
