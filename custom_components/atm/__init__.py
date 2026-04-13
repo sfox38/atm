@@ -93,12 +93,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _audit_flush_loop() -> None:
         while True:
-            interval = data.store.get_settings().audit_flush_interval
-            if interval == 0:
-                await asyncio.sleep(300)
-                continue
-            await asyncio.sleep(interval * 60)
-            await audit.async_save()
+            try:
+                interval = data.store.get_settings().audit_flush_interval
+                if interval == 0:
+                    await asyncio.sleep(300)
+                    continue
+                await asyncio.sleep(interval * 60)
+                await audit.async_save()
+            except asyncio.CancelledError:
+                return
 
     audit_task = hass.async_create_background_task(
         _audit_flush_loop(), "atm_audit_flush_loop"

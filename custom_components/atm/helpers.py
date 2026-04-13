@@ -396,6 +396,8 @@ def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:
     """Increment the in-memory request/denied/rate-limit counters for a token.
 
     Counters are initialised on first use and read by sensor.py and the admin stats view.
+    Calls async_write_ha_state() on each sensor for this token so HA reflects the new
+    values immediately without polling.
     """
     if token_id not in data.token_counters:
         data.token_counters[token_id] = {
@@ -409,3 +411,6 @@ def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:
         counters["denied_count"] += 1
     elif outcome == "rate_limited":
         counters["rate_limit_hits"] += 1
+
+    for sensor in data.token_id_sensors.get(token_id, []):
+        sensor.async_write_ha_state()

@@ -318,6 +318,12 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
             <div className="card-header">Rate Limiting</div>
             <RateLimitConfig token={token} onUpdate={setToken} />
           </div>
+          {!token.pass_through && (
+            <div className="card">
+              <div className="card-header">Effective Permission Simulator</div>
+              <PermissionSimulator tokenId={tokenId} />
+            </div>
+          )}
         </div>
 
         <div>
@@ -350,16 +356,10 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
       </div>
 
       {!token.pass_through && (
-        <>
-          <div className="card">
-            <div className="card-header">Permission Summary</div>
-            <PermissionSummary permissions={token.permissions} entityTree={entityTree} />
-          </div>
-          <div className="card">
-            <div className="card-header">Effective Permission Simulator</div>
-            <PermissionSimulator tokenId={tokenId} />
-          </div>
-        </>
+        <div className="card">
+          <div className="card-header">Permission Summary</div>
+          <PermissionSummary permissions={token.permissions} entityTree={entityTree} />
+        </div>
       )}
 
       {showAreaPicker && entityTree && (

@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import utcnow
+
+PARALLEL_UPDATES = 0
 
 from .const import DOMAIN
 from .helpers import token_name_slug
@@ -69,7 +72,7 @@ class ATMTokenSensor(SensorEntity):
             self._attr_state_class = SensorStateClass.MEASUREMENT
         elif sensor_type == "expires_in":
             self._attr_state_class = SensorStateClass.MEASUREMENT
-            self._attr_native_unit_of_measurement = "d"
+            self._attr_native_unit_of_measurement = UnitOfTime.DAYS
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -129,6 +132,7 @@ async def async_setup_entry(
         slug = token_name_slug(token.name)
         token_sensors = _make_sensors(token, data)
         data.platform_entities[slug] = token_sensors
+        data.token_id_sensors[token.id] = token_sensors
         sensors.extend(token_sensors)
 
     if sensors:
@@ -147,6 +151,7 @@ async def async_create_token_sensors(
     slug = token_name_slug(token.name)
     token_sensors = _make_sensors(token, data)
     data.platform_entities[slug] = token_sensors
+    data.token_id_sensors[token.id] = token_sensors
     data.async_add_entities_cb(token_sensors)
 
 
@@ -163,6 +168,8 @@ async def async_remove_token_sensors(
     from homeassistant.helpers import entity_registry as er
     data: ATMData = hass.data[DOMAIN]
     sensors = data.platform_entities.pop(token_slug, [])
+    if sensors:
+        data.token_id_sensors.pop(sensors[0]._token.id, None)
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
     device_id = None

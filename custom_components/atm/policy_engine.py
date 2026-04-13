@@ -269,6 +269,12 @@ def filter_service_response(
 ) -> Any:
     """Recursively redact entity IDs the token cannot access from service response data."""
     if _depth > 10:
+        # Still check strings at this depth - they can contain entity IDs.
+        # Stop recursing into containers to prevent unbounded traversal.
+        if isinstance(response_data, str) and _ENTITY_ID_RE.match(response_data):
+            perm = resolve(response_data, token, hass)
+            if perm in (Permission.NO_ACCESS, Permission.DENY, Permission.NOT_FOUND):
+                return "<redacted>"
         return response_data
     if isinstance(response_data, str):
         if _ENTITY_ID_RE.match(response_data):
@@ -281,6 +287,64 @@ def filter_service_response(
     if isinstance(response_data, list):
         return [filter_service_response(item, token, hass, _depth + 1) for item in response_data]
     return response_data
+
+
+def get_effective_hint(token: TokenRecord, entity_id: str, hass: HomeAssistant) -> str | None:
+    """Return the most specific hint for an entity, checking entity then device then domain nodes.
+
+    Returns None if no hint is configured at any level in the ancestor chain.
+    """
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    permissions = token.permissions
+
+    entity_node = permissions.entities.get(entity_id)
+    if entity_node and entity_node.hint:
+        return entity_node.hint
+
+    if entry and entry.device_id:
+        device_node = permissions.devices.get(entry.device_id)
+        if device_node and device_node.hint:
+            return device_node.hint
+
+    domain = entity_id.split(".")[0]
+    domain_node = permissions.domains.get(domain)
+    if domain_node and domain_node.hint:
+        return domain_node.hint
+
+    return None
+
+
+def template_blocklist_vars() -> dict:
+    """Return a variables dict that shadows HA template globals to block entity enumeration.
+
+    Pass as **template_blocklist_vars() when building the variables dict for
+    Template.async_render(). Jinja2 local variables shadow globals of the same name,
+    so these stubs override HA's built-in functions that could bypass ATM filtering.
+    """
+    return {
+        "integration_entities": lambda *a, **kw: [],
+        "area_entities": lambda *a, **kw: [],
+        "area_devices": lambda *a, **kw: [],
+        "device_entities": lambda *a, **kw: [],
+        "expand": lambda *a, **kw: [],
+        "label_entities": lambda *a, **kw: [],
+        "label_areas": lambda *a, **kw: [],
+        "floor_entities": lambda *a, **kw: [],
+        "floor_areas": lambda *a, **kw: [],
+        "device_attr": lambda *a, **kw: None,
+        "device_id": lambda *a, **kw: None,
+        "areas": lambda *a, **kw: [],
+        "labels": lambda *a, **kw: [],
+        "label_id": lambda *a, **kw: None,
+        "label_name": lambda *a, **kw: None,
+        "floors": lambda *a, **kw: [],
+        "floor_id": lambda *a, **kw: None,
+        "floor_name": lambda *a, **kw: None,
+        "closest": lambda *a, **kw: None,
+        "is_device_attr": lambda *a, **kw: False,
+        "area_id": lambda *a, **kw: None,
+    }
 
 
 def parse_relative_time(value: str) -> datetime:

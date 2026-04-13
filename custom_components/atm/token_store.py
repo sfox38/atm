@@ -383,7 +383,6 @@ class TokenStore:
         token = self._tokens.pop(token_id, None)
         if token is None:
             return None
-        token.revoked = True
         archived = ArchivedTokenRecord(
             id=token.id,
             name=token.name,

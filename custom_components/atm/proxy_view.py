@@ -45,6 +45,7 @@ from .policy_engine import (
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
+    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
@@ -622,30 +623,7 @@ class ATMTemplateView(HomeAssistantView):
                 "is_state": _is_state,
                 "is_state_attr": _is_state_attr,
                 "has_value": _has_value,
-                # Block entity-enumeration HA globals that bypass ATM permission filtering.
-                # Jinja2 local variables shadow globals of the same name.
-                "integration_entities": lambda *a, **kw: [],
-                "area_entities": lambda *a, **kw: [],
-                "area_devices": lambda *a, **kw: [],
-                "device_entities": lambda *a, **kw: [],
-                "expand": lambda *a, **kw: [],
-                "label_entities": lambda *a, **kw: [],
-                "label_areas": lambda *a, **kw: [],
-                "floor_entities": lambda *a, **kw: [],
-                "floor_areas": lambda *a, **kw: [],
-                # Block topology-enumeration globals that reveal unpermitted instance structure.
-                "device_attr": lambda *a, **kw: None,
-                "device_id": lambda *a, **kw: None,
-                "areas": lambda *a, **kw: [],
-                "labels": lambda *a, **kw: [],
-                "label_id": lambda *a, **kw: None,
-                "label_name": lambda *a, **kw: None,
-                "floors": lambda *a, **kw: [],
-                "floor_id": lambda *a, **kw: None,
-                "floor_name": lambda *a, **kw: None,
-                "closest": lambda *a, **kw: None,
-                "is_device_attr": lambda *a, **kw: False,
-                "area_id": lambda *a, **kw: None,
+                **template_blocklist_vars(),
             })
         except Exception:
             return _error(

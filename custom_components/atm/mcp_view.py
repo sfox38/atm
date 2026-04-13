@@ -48,10 +48,12 @@ from .policy_engine import (
     Permission,
     filter_entities_for_token,
     filter_service_response,
+    get_effective_hint,
     resolve,
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
+    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
@@ -404,6 +406,8 @@ async def _tool_call_service(
     device_id = args.get("device_id")
     area_id = args.get("area_id")
     service_data = args.get("service_data") or {}
+    if not isinstance(service_data, dict):
+        service_data = {}
 
     try:
         permitted_entities = resolve_service_targets(
@@ -540,30 +544,7 @@ async def _tool_render_template(
             "is_state": _is_state,
             "is_state_attr": _is_state_attr,
             "has_value": _has_value,
-            # Block entity-enumeration HA globals that bypass ATM permission filtering.
-            # Jinja2 local variables shadow globals of the same name.
-            "integration_entities": lambda *a, **kw: [],
-            "area_entities": lambda *a, **kw: [],
-            "area_devices": lambda *a, **kw: [],
-            "device_entities": lambda *a, **kw: [],
-            "expand": lambda *a, **kw: [],
-            "label_entities": lambda *a, **kw: [],
-            "label_areas": lambda *a, **kw: [],
-            "floor_entities": lambda *a, **kw: [],
-            "floor_areas": lambda *a, **kw: [],
-            # Block topology-enumeration globals that reveal unpermitted instance structure.
-            "device_attr": lambda *a, **kw: None,
-            "device_id": lambda *a, **kw: None,
-            "areas": lambda *a, **kw: [],
-            "labels": lambda *a, **kw: [],
-            "label_id": lambda *a, **kw: None,
-            "label_name": lambda *a, **kw: None,
-            "floors": lambda *a, **kw: [],
-            "floor_id": lambda *a, **kw: None,
-            "floor_name": lambda *a, **kw: None,
-            "closest": lambda *a, **kw: None,
-            "is_device_attr": lambda *a, **kw: False,
-            "area_id": lambda *a, **kw: None,
+            **template_blocklist_vars(),
         })
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "denied", "render_template"
@@ -656,7 +637,7 @@ def _resolve_area_id(entry: Any, device_registry: Any) -> str | None:
     return None
 
 
-def _build_server_info(token: TokenRecord, hass: Any) -> dict:
+def _build_server_info(token: TokenRecord, hass: Any, base_url: str = "") -> dict:
     """Build the atm://server-info resource payload for the MCP resources/read endpoint."""
     states = hass.states.async_all()
     if token.pass_through:
@@ -664,12 +645,6 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
     else:
         filtered = filter_entities_for_token(states, token, hass)
         count = len(filtered)
-
-    base_url = ""
-    try:
-        base_url = str(hass.config.internal_url or hass.config.external_url or "")
-    except Exception:
-        pass
 
     return {
         "name": "ATM Scoped Proxy",
@@ -686,28 +661,6 @@ def _build_server_info(token: TokenRecord, hass: Any) -> dict:
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
     }
 
-
-def _get_effective_hint(token: TokenRecord, entity_id: str, hass: Any) -> str | None:
-    """Return the most specific hint for an entity, checking entity then device then domain nodes."""
-    registry = er.async_get(hass)
-    entry = registry.async_get(entity_id)
-    permissions = token.permissions
-
-    entity_node = permissions.entities.get(entity_id)
-    if entity_node and entity_node.hint:
-        return entity_node.hint
-
-    if entry and entry.device_id:
-        device_node = permissions.devices.get(entry.device_id)
-        if device_node and device_node.hint:
-            return device_node.hint
-
-    domain = entity_id.split(".")[0]
-    domain_node = permissions.domains.get(domain)
-    if domain_node and domain_node.hint:
-        return domain_node.hint
-
-    return None
 
 
 def _build_context_plain(token: TokenRecord, hass: Any) -> str:
@@ -729,9 +682,9 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm == Permission.WRITE:
-                accessible.append((state.entity_id, "READ/WRITE", _get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ/WRITE", get_effective_hint(token, state.entity_id, hass)))
             elif perm == Permission.READ:
-                accessible.append((state.entity_id, "READ", _get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ", get_effective_hint(token, state.entity_id, hass)))
 
         accessible.sort(key=lambda x: x[0])
         lines.append("You have access to the following Home Assistant entities:")
@@ -792,7 +745,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             area_id = _resolve_area_id(entry, dev_registry)
             perm_str = "READ/WRITE" if perm == Permission.WRITE else "READ"
             e: dict = {"entity_id": state.entity_id, "permission": perm_str, "area_id": area_id}
-            hint = _get_effective_hint(token, state.entity_id, hass)
+            hint = get_effective_hint(token, state.entity_id, hass)
             if hint:
                 e["hint"] = hint
             entities.append(e)
@@ -825,6 +778,7 @@ async def _dispatch_mcp(
     data: ATMData,
     client_ip: str,
     protocol_version: str = _MCP_VERSION_SSE,
+    base_url: str = "",
 ) -> tuple[dict | None, str, str, str]:
     """Dispatch one MCP method call.
 
@@ -898,7 +852,7 @@ async def _dispatch_mcp(
                      resource=uri or "/api/atm/mcp", outcome="denied", client_ip=client_ip)
                 return _jsonrpc_error(msg_id, -32602, "Unknown resource URI."), "resources/read", uri, "denied"
             return None, "resources/read", uri, "denied"
-        server_info = _build_server_info(token, hass)
+        server_info = _build_server_info(token, hass, base_url)
         resp = _jsonrpc_result(msg_id, {
             "contents": [{
                 "uri": "atm://server-info",
@@ -926,6 +880,7 @@ async def _handle_streamable_batch(
     data: ATMData,
     request_id: str,
     client_ip: str,
+    base_url: str = "",
 ) -> web.Response:
     """Dispatch a JSON-RPC batch array per MCP 2025-03-26.
 
@@ -951,6 +906,7 @@ async def _handle_streamable_batch(
         response_msg, _, _, _ = await _dispatch_mcp(
             method, msg_id, params, token, hass, data, client_ip,
             protocol_version=_MCP_VERSION_STREAMABLE,
+            base_url=base_url,
         )
         return response_msg
 
@@ -1143,7 +1099,7 @@ class ATMMcpSseView(HomeAssistantView):
             return _error("invalid_request", "Invalid JSON body.", 400, request_id)
 
         if isinstance(parsed, list):
-            return await _handle_streamable_batch(parsed, token, rl_result, hass, data, request_id, client_ip)
+            return await _handle_streamable_batch(parsed, token, rl_result, hass, data, request_id, client_ip, base_url=str(request.url.origin()))
 
         if not isinstance(parsed, dict):
             return _error("invalid_request", "Request body must be a JSON object or array.", 400, request_id)
@@ -1164,6 +1120,7 @@ class ATMMcpSseView(HomeAssistantView):
         response_msg, _log_method, _log_resource, _outcome = await _dispatch_mcp(
             method, msg_id, params, token, hass, data, client_ip,
             protocol_version=_MCP_VERSION_STREAMABLE,
+            base_url=str(request.url.origin()),
         )
 
         if response_msg is None:
@@ -1234,6 +1191,7 @@ class ATMMcpMessagesView(HomeAssistantView):
         response_msg, _log_method, _log_resource, _outcome = await _dispatch_mcp(
             method, msg_id, params, token, hass, data, client_ip,
             protocol_version=_MCP_VERSION_SSE,
+            base_url=str(request.url.origin()),
         )
 
         if response_msg is not None:

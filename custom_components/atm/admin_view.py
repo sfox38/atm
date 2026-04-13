@@ -16,7 +16,7 @@ from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
-from .mcp_view import _get_effective_hint
+from .policy_engine import get_effective_hint
 from .data import ATMData
 from .helpers import terminate_token_connections, token_name_slug
 from .policy_engine import Permission, filter_entities_for_token, resolve
@@ -638,7 +638,7 @@ class ATMAdminResolveView(HomeAssistantView):
             Permission.NOT_FOUND: "NOT_FOUND",
         }
 
-        effective_hint = _get_effective_hint(token, entity_id, hass)
+        effective_hint = get_effective_hint(token, entity_id, hass)
 
         return _ok({
             "entity_id": entity_id,

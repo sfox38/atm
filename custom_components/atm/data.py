@@ -36,6 +36,8 @@ class ATMData:
     entity_tree_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Keyed by token name slug; values are the list of ATMTokenSensor instances.
     platform_entities: dict[str, list] = field(default_factory=dict)
+    # Keyed by token ID for fast sensor lookup during counter updates.
+    token_id_sensors: dict[str, list] = field(default_factory=dict)
     async_add_entities_cb: Callable | None = None
     # session_id -> (queue, token_id)
     mcp_sessions: dict[str, tuple[asyncio.Queue, str]] = field(default_factory=dict)
