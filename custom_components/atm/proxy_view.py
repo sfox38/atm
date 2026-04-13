@@ -347,9 +347,13 @@ class ATMHistoryView(HomeAssistantView):
                  outcome="allowed", client_ip=client_ip)
             return _json_response({}, 200, request_id, rl_result)
 
+        # Validate time ordering before touching the DB.
+        effective_end = end_time if end_time is not None else _utcnow()
+        if start_time > effective_end:
+            return _error("invalid_request", "start_time must not be after end_time.", 400, request_id)
+
         # Clamp the query time range to prevent unbounded DB reads. The cap is applied
         # to the DB query itself, not just the response, to bound recorder thread load.
-        effective_end = end_time if end_time is not None else _utcnow()
         max_start = effective_end - timedelta(days=_MAX_HISTORY_RANGE_DAYS)
         if start_time < max_start:
             start_time = max_start
@@ -399,7 +403,11 @@ class ATMHistoryView(HomeAssistantView):
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
-        return _json_response(output, 200, request_id, rl_result)
+        range_headers = {
+            "X-ATM-History-Start": start_time.isoformat(),
+            "X-ATM-History-End": effective_end.isoformat(),
+        }
+        return _json_response(output, 200, request_id, rl_result, extra_headers=range_headers)
 
 
 class ATMStatisticsView(HomeAssistantView):

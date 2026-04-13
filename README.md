@@ -252,7 +252,7 @@ When the kill switch is enabled at startup, ATM registers no proxy or MCP routes
 
 - Request bodies exceeding 1 MB are rejected with 413 before any processing.
 - SSE connections are limited to 5 per token. A sixth connection is rejected with 429.
-- History queries are capped at a 7-day time range. Requests spanning more than 7 days are silently clamped to the most recent 7 days before hitting the recorder database.
+- History queries are capped at a 7-day time range. Requests spanning more than 7 days are silently clamped to the most recent 7 days before hitting the recorder database. The actual queried range is always returned in `X-ATM-History-Start` and `X-ATM-History-End` response headers. Passing a `start_time` after `end_time` returns 400.
 - Every response includes an `X-ATM-Request-ID` header with a UUID that matches the corresponding audit log entry.
 
 ---

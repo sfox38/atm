@@ -48,3 +48,5 @@ class ATMData:
     routes_registered: bool = False
     # Called by the admin settings PATCH when the kill switch is deactivated.
     async_register_routes: Callable | None = None
+    # Incremented on each wipe so ghost SSE sessions can detect they outlived a wipe.
+    wipe_epoch: int = 0

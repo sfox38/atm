@@ -294,6 +294,20 @@ async def terminate_token_connections(
             queue.put_nowait(None)
 
 
+class _ContextProxy(dict):
+    """Dict subclass that also supports attribute access.
+
+    Used by ScrubbedState.context so templates can use both context.id and
+    context | tojson without TypeError. Behaves as a plain dict for json.dumps().
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
 class ScrubbedState:
     """Lightweight State wrapper that strips sensitive attributes for use in template sandboxes."""
 
@@ -306,15 +320,11 @@ class ScrubbedState:
         # Strip user_id from context to prevent HA user ID enumeration via templates.
         ctx = getattr(raw, "context", None)
         if ctx is not None:
-            self.context = type(
-                "Context",
-                (),
-                {
-                    "id": getattr(ctx, "id", None),
-                    "parent_id": getattr(ctx, "parent_id", None),
-                    "user_id": None,
-                },
-            )()
+            self.context = _ContextProxy({
+                "id": getattr(ctx, "id", None),
+                "parent_id": getattr(ctx, "parent_id", None),
+                "user_id": None,
+            })
         else:
             self.context = None
 

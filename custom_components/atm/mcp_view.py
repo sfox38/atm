@@ -1008,6 +1008,7 @@ class ATMMcpSseView(HomeAssistantView):
             messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
             await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
 
+            session_epoch = data.wipe_epoch
             try:
                 while True:
                     try:
@@ -1016,6 +1017,8 @@ class ATMMcpSseView(HomeAssistantView):
                             timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
                         )
                     except asyncio.TimeoutError:
+                        if data.wipe_epoch != session_epoch:
+                            break
                         await response.write(b": heartbeat\n\n")
                         continue
                     if msg is None:

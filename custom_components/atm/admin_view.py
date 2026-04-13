@@ -116,22 +116,34 @@ def _validate_node_id(node_type: str, node_id: str, rid: str) -> web.Response | 
 
 
 def _validate_permission_tree_body(body: dict, rid: str) -> web.Response | None:
-    """Return an error response if any node ID or node state in the permission tree body is invalid."""
+    """Return an error response if any node ID, state, or hint in the permission tree body is invalid."""
     for section, node_type in (("domains", "domains"), ("devices", "devices"), ("entities", "entities")):
         for key, value in body.get(section, {}).items():
             err = _validate_node_id(node_type, key, rid)
             if err:
                 return err
-            if isinstance(value, dict):
-                state = value.get("state", "GREY")
-                if state not in _VALID_NODE_STATES:
-                    return _err(
-                        "invalid_request",
-                        f"Invalid state {state!r} for {node_type[:-1]} {key!r}. "
-                        f"Valid states: {sorted(_VALID_NODE_STATES)}.",
-                        400,
-                        rid,
-                    )
+            if not isinstance(value, dict):
+                return _err(
+                    "invalid_request",
+                    f"Node {key!r} value must be an object with a 'state' key.",
+                    400,
+                    rid,
+                )
+            state = value.get("state", "GREY")
+            if state not in _VALID_NODE_STATES:
+                return _err(
+                    "invalid_request",
+                    f"Invalid state {state!r} for {node_type[:-1]} {key!r}. "
+                    f"Valid states: {sorted(_VALID_NODE_STATES)}.",
+                    400,
+                    rid,
+                )
+            hint = value.get("hint")
+            if hint is not None:
+                if not isinstance(hint, str):
+                    return _err("invalid_request", f"hint for {key!r} must be a string.", 400, rid)
+                if len(hint) > 200:
+                    return _err("invalid_request", f"hint for {key!r} exceeds 200 characters.", 400, rid)
     return None
 
 
@@ -913,7 +925,9 @@ class ATMAdminWipeView(HomeAssistantView):
 
         # Clear mcp_sessions after storage wipe so any sessions created during the
         # async yields above (audit wipe, lock acquisition) are also removed.
+        # Increment wipe_epoch so any ghost SSE heartbeat loops detect the wipe and exit.
         data.mcp_sessions.clear()
+        data.wipe_epoch += 1
 
         if not data.routes_registered and data.async_register_routes:
             await data.async_register_routes()
