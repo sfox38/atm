@@ -8,7 +8,7 @@ interface Props {
 }
 
 interface FlagDef {
-  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_script_write" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
+  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_script_write" | "allow_log_read" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
   label: string;
   description: string;
   alwaysShown?: boolean;
@@ -39,6 +39,12 @@ const FLAGS: FlagDef[] = [
     alwaysShown: true,
     confirmWarning: "Script payloads are not validated against this token's entity scope. A client with this flag enabled can create scripts that control any entity in Home Assistant, regardless of what this token is permitted to access directly.",
     confirmAck: "I understand that script write bypasses entity-level access controls",
+  },
+  {
+    key: "allow_log_read",
+    label: "Allow log read",
+    description: "Permits the get_logs tool and GET /api/atm/logs endpoint to read Home Assistant system log entries.",
+    alwaysShown: true,
   },
   {
     key: "allow_config_read",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { TokenRecord, GlobalSettings } from "./types";
 import { TokenListView } from "./views/TokenList";
@@ -20,17 +20,35 @@ const PANEL_CSS = `
   :host {
     display: block;
     height: 100%;
+    position: relative;
+    touch-action: pan-y;
     background: var(--primary-background-color, #fafafa);
     color: var(--primary-text-color, #212121);
     font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
     font-size: 14px;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; touch-action: pan-y; }
 
   .atm-shell {
     display: flex;
     flex-direction: column;
     height: 100%;
+  }
+
+  .atm-header {
+    display: flex;
+    align-items: center;
+    height: 56px;
+    padding: 0 4px;
+    background: var(--app-header-background-color, var(--primary-color, #03a9f4));
+    color: var(--app-header-text-color, #fff);
+    flex-shrink: 0;
+  }
+  .atm-header-title {
+    font-size: 20px;
+    font-weight: 400;
+    margin-left: 4px;
+    color: var(--app-header-text-color, #fff);
   }
 
   /* Tab bar */
@@ -69,6 +87,7 @@ const PANEL_CSS = `
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+    touch-action: pan-y;
   }
 
   /* Card */
@@ -246,7 +265,7 @@ const PANEL_CSS = `
 
   /* Modal overlay */
   .modal-backdrop {
-    position: fixed;
+    position: absolute;
     inset: 0;
     background: rgba(0,0,0,0.5);
     display: flex;
@@ -602,7 +621,7 @@ type View =
   | { name: "list" }
   | { name: "detail"; tokenId: string };
 
-function ATMApp({ hass }: { hass: unknown }) {
+function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
   const [tab, setTab] = useState<Tab>("tokens");
   const [view, setView] = useState<View>({ name: "list" });
   const [tokens, setTokens] = useState<TokenRecord[]>([]);
@@ -610,6 +629,14 @@ function ATMApp({ hass }: { hass: unknown }) {
   const [loadingTokens, setLoadingTokens] = useState(true);
   const [tokensError, setTokensError] = useState<string | null>(null);
   const [showArchivedTokens, setShowArchivedTokens] = useState(false);
+  const menuRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (menuRef.current) {
+      (menuRef.current as Record<string, unknown>).hass = hass;
+      (menuRef.current as Record<string, unknown>).narrow = narrow;
+    }
+  }, [hass, narrow]);
 
   const refreshTokens = useCallback(async () => {
     setLoadingTokens(true);
@@ -641,6 +668,12 @@ function ATMApp({ hass }: { hass: unknown }) {
 
   return (
     <div className="atm-shell">
+      {narrow && (
+        <div className="atm-header">
+          <ha-menu-button ref={menuRef as React.RefObject<HTMLElement>} />
+          <span className="atm-header-title">ATM</span>
+        </div>
+      )}
       <div className="atm-tabs">
         {(["tokens", "audit", "settings"] as Tab[]).map((t) => (
           <button
@@ -690,9 +723,11 @@ function ATMApp({ hass }: { hass: unknown }) {
 class ATMPanelElement extends HTMLElement {
   private _root: Root | null = null;
   private _hass: unknown = null;
+  private _narrow: boolean = false;
   private _prevUserId: string | undefined = undefined;
 
   connectedCallback() {
+    this.style.touchAction = "pan-y";
     const shadow = this.attachShadow({ mode: "open" });
 
     const style = document.createElement("style");
@@ -722,9 +757,16 @@ class ATMPanelElement extends HTMLElement {
     }
   }
 
+  set narrow(value: boolean) {
+    if (this._narrow !== value) {
+      this._narrow = value;
+      this._render();
+    }
+  }
+
   private _render() {
     if (this._root) {
-      this._root.render(<ATMApp hass={this._hass} />);
+      this._root.render(<ATMApp hass={this._hass} narrow={this._narrow} />);
     }
   }
 }

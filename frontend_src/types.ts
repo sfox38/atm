@@ -28,6 +28,7 @@ export interface TokenRecord {
   rate_limit_burst: number;
   allow_automation_write: boolean;
   allow_script_write: boolean;
+  allow_log_read: boolean;
   allow_config_read: boolean;
   allow_template_render: boolean;
   allow_restart: boolean;
@@ -154,6 +155,7 @@ export interface PatchTokenBody {
   rate_limit_burst?: number;
   allow_automation_write?: boolean;
   allow_script_write?: boolean;
+  allow_log_read?: boolean;
   allow_config_read?: boolean;
   allow_template_render?: boolean;
   allow_restart?: boolean;
@@ -196,6 +198,7 @@ declare global {
         active?: boolean;
         size?: string;
       };
+      "ha-menu-button": React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
     }
   }
 }
