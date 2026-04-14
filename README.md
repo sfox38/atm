@@ -92,19 +92,57 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 
 ### Available MCP tools
 
+ATM is a drop-in replacement for the native HA MCP server. It exposes all 20 native HA MCP tools plus ATM-specific tools for direct entity access and system operations.
+
+**Native HA MCP tools** - functionally identical to the native HA MCP server, scoped to the token's permission tree:
+
+| Tool | Description |
+|---|---|
+| `GetLiveContext` | YAML snapshot of accessible entity states |
+| `GetDateTime` | Current date, time, and timezone |
+| `HassTurnOn` / `HassTurnOff` | Turn devices on or off by area, name, floor, or domain |
+| `HassLightSet` | Set light brightness, color, or color temperature |
+| `HassFanSetSpeed` | Set fan speed |
+| `HassClimateSetTemperature` | Set climate device target temperature |
+| `HassSetPosition` | Set position of covers or similar devices |
+| `HassSetVolume` / `HassSetVolumeRelative` | Set or adjust media player volume |
+| `HassMediaPause` / `HassMediaUnpause` | Pause or resume media playback |
+| `HassMediaNext` / `HassMediaPrevious` | Skip tracks on a media player |
+| `HassMediaSearchAndPlay` | Search and play media |
+| `HassMediaPlayerMute` / `HassMediaPlayerUnmute` | Mute or unmute a media player |
+| `HassCancelAllTimers` | Cancel all timers in an area |
+| `HassStopMoving` | Stop a moving cover or device |
+
+**ATM entity tools** - direct entity access filtered by permission tree:
+
 | Tool | Requires flag |
 |---|---|
 | `get_state` - current state of one entity | none |
 | `get_states` - all accessible entity states | none |
-| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`, capped at 7 days) | none |
+| `get_history` - state history (supports `24h`, `7d`, `2w`, `1m`) | none |
 | `get_statistics` - long-term statistics for numeric entities | none |
-| `call_service` - call a HA service | none |
+| `call_service` - call a HA service by domain and service name | none |
+
+**System tools** - gated by capability flags:
+
+| Tool | Requires flag |
+|---|---|
 | `render_template` - render a Jinja2 template | `allow_template_render` |
 | `get_config` - HA configuration info | `allow_config_read` |
 | `restart_ha` - restart Home Assistant | `allow_restart` |
-| `create_automation`, `edit_automation`, `delete_automation` | `allow_automation_write` (returns a not-implemented error in v1) |
+| `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
+| `get_logs` - read recent HA system log entries (newest first) | `allow_log_read` |
+| `create_automation` - create a new automation in `automations.yaml` | `allow_automation_write` |
+| `edit_automation` - replace an existing automation's configuration | `allow_automation_write` |
+| `delete_automation` - permanently delete an automation | `allow_automation_write` |
+| `create_script` - create a new script in `scripts.yaml` | `allow_script_write` |
+| `edit_script` - replace an existing script's configuration | `allow_script_write` |
+| `delete_script` - permanently delete a script | `allow_script_write` |
 
-Claude can only see and act on entities within the token's permission scope.
+Claude can only see and act on entities within the token's permission scope. Native tools silently skip inaccessible entities without revealing they exist.
+
+> [!NOTE]
+> After enabling or disabling a capability flag in the ATM panel, your MCP client must reconnect to receive the updated tool list. In Claude Code, use the `/mcp` menu and select **Reconnect**.
 
 ---
 
@@ -174,15 +212,31 @@ These apply to every token including pass-through and are not configurable:
 
 Some operations require explicit opt-in even for tokens with 🟢 GREEN domain access:
 
-| Flag | What it enables |
-|---|---|
-| `allow_restart` | `homeassistant.restart` and `homeassistant.stop` |
-| `allow_config_read` | Reading HA configuration data |
-| `allow_template_render` | Rendering Jinja2 templates |
-| `allow_automation_write` | Automation management (returns a not-implemented error in v1) |
-| `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. |
+| Flag | What it enables | Pass-through exempt |
+|---|---|---|
+| `allow_restart` | `homeassistant.restart` and `homeassistant.stop` | yes |
+| `allow_physical_control` | Lock, alarm, and cover mutation services (e.g. `lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`) | yes |
+| `allow_automation_write` | Creating, editing, and deleting automations via the MCP tools. See security note below. | yes |
+| `allow_script_write` | Creating, editing, and deleting scripts via the MCP tools. See security note below. | yes |
+| `allow_config_read` | Reading HA configuration data and the event bus listener list | no |
+| `allow_template_render` | Rendering Jinja2 templates (permission-scoped environment) | no |
+| `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. | no |
+| `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices. | no |
+| `allow_log_read` | Reading HA system log entries via the `get_logs` MCP tool and `GET /api/atm/logs`. Logs may contain IP addresses and operational details. ATM's own entries are always excluded; token values are scrubbed from messages and tracebacks. | yes |
 
-`allow_restart` is the one exception to pass-through mode's wide access. Even a pass-through token cannot restart HA without this flag explicitly set.
+The five pass-through-exempt flags (`allow_restart`, `allow_physical_control`, `allow_automation_write`, `allow_script_write`, `allow_log_read`) must be explicitly enabled even for pass-through tokens. All other flags are bypassed by pass-through tokens.
+
+### Automation and script write flags
+
+`allow_automation_write` and `allow_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully control.
+
+**These flags are all-or-nothing.** The automation and script write tools (`create_automation`, `edit_automation`, `delete_automation`, `create_script`, `edit_script`, `delete_script`) write directly to `automations.yaml` and `scripts.yaml`. They do not consult the token's entity permission tree. A client with `allow_automation_write` enabled can write an automation referencing any entity in Home Assistant, regardless of what the token is permitted to access directly via `get_state` or `call_service`.
+
+**The entity permission tree cannot restrict automation/script write.** Setting the `automation` or `script` domain to READ or DENY in the permission tree has no effect on these MCP tools. A DENY on `automation.*` only blocks entity-scoped operations (reading automation entity state, calling `automation.trigger`). It does not prevent the write tools from creating or modifying automation YAML.
+
+**Triggered actions run outside ATM.** An automation or script created through ATM is subsequently triggered by HA's own automation engine, which runs under HA's own context - not ATM's. Permission checks do not apply to the actions taken when a triggered automation runs.
+
+In practice, a token with a narrow entity scope but `allow_automation_write` enabled could - through a crafted automation - indirectly control entities it cannot access directly. Only enable these flags for clients you would trust with broad HA access.
 
 ---
 
@@ -194,9 +248,15 @@ Pass-through does NOT bypass:
 - The `atm` domain blocklist
 - Sensitive attribute scrubbing
 - Rate limiting
-- The `allow_restart` requirement
+- `allow_restart` - a pass-through token cannot call `homeassistant.restart` or `homeassistant.stop` without this flag explicitly enabled.
+- `allow_physical_control` - a pass-through token cannot call lock, alarm, or cover mutation services without this flag explicitly enabled.
+- `allow_automation_write` - a pass-through token cannot create, edit, or delete automations without this flag explicitly enabled.
+- `allow_script_write` - a pass-through token cannot create, edit, or delete scripts without this flag explicitly enabled.
+- `allow_log_read` - a pass-through token cannot read HA system log entries without this flag explicitly enabled.
 
-Creating a pass-through token requires confirming your intent in the panel or sending `confirm_pass_through: true` in the API request. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
+These five flags must always be explicitly enabled, regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed by pass-through tokens.
+
+The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true` - this is a required acknowledgment field that prevents accidentally enabling pass-through. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
 
 ---
 
@@ -234,6 +294,8 @@ If `notify_on_rate_limit` is enabled in global settings, HA creates a persistent
 - If all entities in a service call resolve to denied, ATM returns 403 rather than calling HA with an empty list.
 - Service response data is scanned for entity IDs. Any entity ID the token cannot access is replaced with `"<redacted>"`.
 - If an entity ID in a service call does not exist in the HA entity registry, ATM returns 403. Entity creation via service calls is not permitted.
+- Physical control services (`lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`, and related services) require `allow_physical_control` in addition to entity-level WRITE permission. This applies even to pass-through tokens.
+- Automation and script write MCP tools bypass the entity permission tree. Setting the `automation` or `script` domain to RED or YELLOW does not prevent these tools from writing YAML. See the [Automation and script write flags](#automation-and-script-write-flags) section.
 
 ### Token lifecycle
 
@@ -269,7 +331,7 @@ ATM creates six HA sensor entities for each active token. For a token named `cla
 | `sensor.atm_claude_code_denied_count` | Requests blocked by permission rules |
 | `sensor.atm_claude_code_rate_limit_hits` | Times this token was rate limited |
 | `sensor.atm_claude_code_last_access` | Timestamp of the most recent request |
-| `sensor.atm_claude_code_expires_in` | Days until expiry, or -1 if no expiry |
+| `sensor.atm_claude_code_expires_in` | Days until expiry, or `No expiry` if no expiry is set |
 
 Sensors are removed automatically when a token is revoked. ATM sensors are blocked from all token access. External tools cannot read their own telemetry through ATM.
 
@@ -301,6 +363,8 @@ Each entry records a unique request ID (matching the `X-ATM-Request-ID` response
 `not_found` is recorded when an entity is genuinely absent from both HA state and the entity registry. From the caller's perspective it looks identical to `denied`, but the audit log distinguishes them so you can tell whether a token is hitting a missing entity or a permission wall.
 
 `not_implemented` is recorded when an MCP client calls a method that ATM does not support (for example, `resources/templates/list`). This is a protocol-level gap, not a permission block, and does not increment the token's denied counter.
+
+`invalid_request` is recorded when a request is structurally malformed and rejected before it reaches permission checks - for example, a template render call with a syntax error in the template body.
 
 ### Persistence
 

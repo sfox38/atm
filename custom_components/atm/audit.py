@@ -19,7 +19,14 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented"]
+# Outcome values:
+#   allowed        - request completed successfully
+#   denied         - blocked by permission rules, blocklist, dual-gate, or RED/NO_ACCESS
+#   not_found      - entity absent from hass.states and entity registry (ghost pre-check)
+#   rate_limited   - token exceeded its rate limit
+#   not_implemented - MCP method received but not supported (e.g. resources/templates/list)
+#   invalid_request - request was structurally invalid (e.g. template render with bad syntax)
+Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"]
 
 _REDACTED = "[redacted]"
 
@@ -118,7 +125,7 @@ class AuditLog:
             pass_through=pass_through,
         ))
 
-    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented"})
+    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"})
 
     def query(
         self,

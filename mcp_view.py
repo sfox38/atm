@@ -7,41 +7,27 @@ import functools
 import hashlib
 import json
 import logging
-import math
-import os
 import re
 import uuid
-from datetime import timedelta
 from typing import Any
 
 from aiohttp import web
-from homeassistant.components.automation.config import (
-    async_validate_config_item as _validate_automation_config,
-)
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.script.config import (
-    async_validate_config_item as _validate_script_config,
-)
-from homeassistant.util.file import write_utf8_file_atomic as _write_utf8_file_atomic
-from homeassistant.util.yaml import dump as _yaml_dump, load_yaml as _load_yaml
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store as _Store
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
 from .const import (
-    ANNOUNCE_BIT,
     ATM_VERSION,
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
-    MAX_HISTORY_RANGE_DAYS,
-    MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
-    PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
     SSE_HEARTBEAT_INTERVAL,
@@ -82,47 +68,14 @@ _LOGGER = logging.getLogger(__name__)
 _MCP_VERSION_SSE = "2024-11-05"
 _MCP_VERSION_STREAMABLE = "2025-03-26"
 
-_AUTOMATION_YAML = "automations.yaml"
+_AUTOMATION_STORE_KEY = "core.automation"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write", "allow_log_read"})
-_SCRIPT_CONFIG_PATH = "scripts.yaml"
-_SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
 
 def _get_automation_lock(hass: Any) -> asyncio.Lock:
     if _AUTOMATION_LOCK_KEY not in hass.data:
         hass.data[_AUTOMATION_LOCK_KEY] = asyncio.Lock()
     return hass.data[_AUTOMATION_LOCK_KEY]
-
-
-def _read_automations_yaml(path: str) -> list:
-    if not os.path.isfile(path):
-        return []
-    data = _load_yaml(path)
-    return data if isinstance(data, list) else []
-
-
-def _write_automations_yaml(path: str, data: list) -> None:
-    contents = _yaml_dump(data)
-    _write_utf8_file_atomic(path, contents)
-
-
-def _get_script_lock(hass: Any) -> asyncio.Lock:
-    if _SCRIPT_LOCK_KEY not in hass.data:
-        hass.data[_SCRIPT_LOCK_KEY] = asyncio.Lock()
-    return hass.data[_SCRIPT_LOCK_KEY]
-
-
-def _read_scripts_yaml(path: str) -> dict:
-    if not os.path.isfile(path):
-        return {}
-    data = _load_yaml(path)
-    return data if isinstance(data, dict) else {}
-
-
-def _write_scripts_yaml(path: str, data: dict) -> None:
-    contents = _yaml_dump(data)
-    _write_utf8_file_atomic(path, contents)
 
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
@@ -229,21 +182,16 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_automation",
         "description": (
-            "Create a new Home Assistant automation stored in automations.yaml. "
+            "Create a new Home Assistant automation stored in the UI automation registry. "
+            "Provide the full automation configuration as 'config' (alias, trigger, condition, action, mode, etc.). "
             "Do not include an 'id' field - ATM assigns the ID automatically. "
-            "Returns the saved configuration including the generated automation_id. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'trigger' (list of trigger objects, each with a 'platform' field, required), "
-            "'action' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'condition' (list of condition objects, optional), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional)."
+            "Returns the saved configuration including the generated automation_id."
         ),
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "config": {"type": "object", "description": "Full HA automation configuration (alias, trigger, action, condition, mode). Do not include 'id'."},
+                "config": {"type": "object", "description": "Full HA automation configuration object (alias, trigger, condition, action, mode)."},
             },
             "required": ["config"],
         },
@@ -254,28 +202,21 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "Replace the configuration of an existing Home Assistant automation. "
             "The 'config' object entirely replaces the current automation configuration. "
             "The automation_id is preserved - do not include it in 'config'. "
-            "Returns the updated configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
-            "ATM-created automations have IDs prefixed with 'atm_'."
+            "Returns the updated configuration."
         ),
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "automation_id": {"type": "string", "description": "ID of the automation to edit, as returned by create_automation or get_config."},
-                "config": {"type": "object", "description": "Full replacement automation configuration (alias, trigger, action, condition, mode). Do not include 'id'."},
+                "config": {"type": "object", "description": "Full replacement automation configuration (alias, trigger, condition, action, mode)."},
             },
             "required": ["automation_id", "config"],
         },
     },
     {
         "name": "delete_automation",
-        "description": (
-            "Permanently delete a Home Assistant automation from automations.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
-            "ATM-created automations have IDs prefixed with 'atm_'."
-        ),
+        "description": "Permanently delete a Home Assistant automation from the UI automation registry.",
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
@@ -283,95 +224,6 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "automation_id": {"type": "string", "description": "ID of the automation to delete."},
             },
             "required": ["automation_id"],
-        },
-    },
-    {
-        "name": "create_script",
-        "description": (
-            "Create a new Home Assistant script stored in scripts.yaml. "
-            "Provide a unique script_id (slug, e.g. 'morning_routine') - this becomes the entity_id: script.<script_id>. "
-            "Returns the saved configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'sequence' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional), "
-            "'variables' (dict of script-level variables, optional), "
-            "'fields' (dict of input field definitions for callable scripts, optional)."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "Unique slug for the script (e.g. 'morning_routine'). Becomes script.<script_id> in HA. Must not already exist."},
-                "config": {"type": "object", "description": "Full HA script configuration (alias, sequence, mode, variables, fields)."},
-            },
-            "required": ["script_id", "config"],
-        },
-    },
-    {
-        "name": "edit_script",
-        "description": (
-            "Replace the configuration of an existing Home Assistant script. "
-            "The 'config' object entirely replaces the current script configuration. "
-            "Returns the updated configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "ID of the script to edit (the slug, e.g. 'morning_routine')."},
-                "config": {"type": "object", "description": "Full replacement script configuration (alias, sequence, mode, variables, fields)."},
-            },
-            "required": ["script_id", "config"],
-        },
-    },
-    {
-        "name": "delete_script",
-        "description": (
-            "Permanently delete a Home Assistant script from scripts.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "ID of the script to delete (the slug, e.g. 'morning_routine')."},
-            },
-            "required": ["script_id"],
-        },
-    },
-    {
-        "name": "get_logs",
-        "description": (
-            "Read recent Home Assistant system log entries. "
-            "Useful for diagnosing errors, failed automations, or integration problems. "
-            "Returns entries at or above the specified level, newest first. "
-            "ATM's own log entries are excluded."
-        ),
-        "flag": "allow_log_read",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "level": {
-                    "type": "string",
-                    "enum": ["INFO", "WARNING", "ERROR"],
-                    "description": "Minimum log level. INFO returns INFO+WARNING+ERROR; WARNING returns WARNING+ERROR; ERROR returns ERROR only. Defaults to WARNING.",
-                    "default": "WARNING",
-                },
-                "integration": {
-                    "type": "string",
-                    "description": "Optional integration name to filter by (e.g. 'hue', 'mqtt'). Matches homeassistant.components.<name> and custom_components.<name>.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 50,
-                    "description": "Maximum number of entries to return (1-100, default 50).",
-                },
-            },
         },
     },
     {
@@ -659,14 +511,6 @@ def _jsonrpc_error(msg_id: Any, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-def _jsonrpc_notification(method: str, params: dict | None = None) -> dict:
-    """Build a JSON-RPC 2.0 notification (no id field)."""
-    msg: dict = {"jsonrpc": "2.0", "method": method}
-    if params is not None:
-        msg["params"] = params
-    return msg
-
-
 def _tool_success(text: str) -> dict:
     """Return an MCP tool result content block with a plain-text payload."""
     return {"content": [{"type": "text", "text": text}]}
@@ -738,11 +582,6 @@ async def _tool_get_history(
         except ValueError:
             return _tool_error("Invalid end_time format."), "denied", entity_id
 
-    effective_end = end_time or utcnow()
-    max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
-    if start_time < max_start:
-        start_time = max_start
-
     try:
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder import history as rec_history
@@ -805,11 +644,6 @@ async def _tool_get_statistics(
         except ValueError:
             return _tool_error("Invalid end_time format."), "denied", entity_id
 
-    effective_end = end_time or utcnow()
-    max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
-    if start_time < max_start:
-        start_time = max_start
-
     period = args.get("period", "hour")
     if period not in ("5minute", "hour", "day", "week", "month"):
         return _tool_error("Invalid period. Must be one of: 5minute, hour, day, week, month."), "denied", entity_id
@@ -858,9 +692,6 @@ async def _tool_call_service(
     if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
         return _tool_error("Forbidden."), "denied", resource
 
-    if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
-        return _tool_error("Forbidden."), "denied", resource
-
     entity_id = args.get("entity_id")
     device_id = args.get("device_id")
     area_id = args.get("area_id")
@@ -868,36 +699,8 @@ async def _tool_call_service(
     if not isinstance(service_data, dict):
         service_data = {}
 
-    # DUAL_GATE_SERVICES have no entities in hass.states; routing them through
-    # resolve_service_targets always produces an empty list and a spurious 403.
-    # The allow_restart gate above is the only permission check required.
-    if service_key in DUAL_GATE_SERVICES:
-        if domain in HIGH_RISK_DOMAINS:
-            _LOGGER.info(
-                "High-risk service call %s/%s by token %s",
-                domain, service, token.name,
-            )
-        try:
-            async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
-                await hass.services.async_call(
-                    domain, service, service_data, blocking=True, return_response=False,
-                )
-        except asyncio.TimeoutError:
-            return (
-                _tool_success(json.dumps({
-                    "success": True,
-                    "partial": True,
-                    "message": "Service dispatched but HA did not respond within the timeout window.",
-                })),
-                "allowed",
-                resource,
-            )
-        except (ServiceNotFound, HomeAssistantError):
-            return _tool_error("Forbidden."), "denied", resource
-        return _tool_success(json.dumps({"success": True})), "allowed", resource
-
     try:
-        permitted_entities, _requested_count = resolve_service_targets(
+        permitted_entities = resolve_service_targets(
             entity_id=entity_id,
             device_id=device_id,
             area_id=area_id,
@@ -977,73 +780,6 @@ async def _tool_get_config(
     return _tool_success(json.dumps(config_dict, default=str)), "allowed", "get_config"
 
 
-_MCP_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
-_MCP_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
-_MCP_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
-
-
-async def _tool_get_logs(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: read system_log entries (requires allow_log_read)."""
-    if not token.allow_log_read:
-        return _tool_error("Forbidden. The allow_log_read flag must be enabled on this token."), "denied", "get_logs"
-
-    raw_level = str(args.get("level") or "WARNING").strip().upper()
-    if raw_level not in ("INFO", "WARNING", "ERROR"):
-        raw_level = "WARNING"
-    min_rank = _MCP_LOG_LEVEL_RANK.get(raw_level, _MCP_LOG_LEVEL_RANK["WARNING"])
-
-    integration = str(args.get("integration") or "").strip() or None
-
-    limit = 50
-    raw_limit = args.get("limit")
-    if raw_limit is not None:
-        try:
-            limit = int(raw_limit)
-            if not (1 <= limit <= MAX_LOG_ENTRIES):
-                limit = max(1, min(limit, MAX_LOG_ENTRIES))
-        except (TypeError, ValueError):
-            limit = 50
-
-    syslog = hass.data.get("system_log")
-    if syslog is None:
-        return _tool_success(json.dumps({"count": 0, "entries": []})), "allowed", "get_logs"
-
-    records = getattr(syslog, "records", {})
-    entries: list[dict] = []
-    for record in records.values():
-        record_level = getattr(record, "level", "")
-        if _MCP_LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
-            continue
-        logger_name = getattr(record, "name", "")
-        if any(logger_name.startswith(pfx) for pfx in _MCP_ATM_LOGGER_PREFIXES):
-            continue
-        if integration:
-            if not (
-                logger_name.startswith(f"homeassistant.components.{integration}")
-                or logger_name.startswith(f"custom_components.{integration}")
-            ):
-                continue
-        messages = getattr(record, "message", [])
-        msg = list(messages)[-1] if messages else ""
-        exc_parts = getattr(record, "exception", [])
-        exc_str: str | None = "".join(exc_parts) if exc_parts else None
-        entries.append({
-            "timestamp": getattr(record, "timestamp", 0),
-            "first_occurred": getattr(record, "first_occurred", 0),
-            "level": record_level,
-            "logger": logger_name,
-            "message": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
-            "exception": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
-            "occurrences": getattr(record, "count", 1),
-        })
-
-    entries.sort(key=lambda e: e["timestamp"], reverse=True)
-    entries = entries[:limit]
-    return _tool_success(json.dumps({"count": len(entries), "entries": entries}, default=str)), "allowed", "get_logs"
-
-
 
 async def _tool_render_template(
     args: dict, token: TokenRecord, hass: Any
@@ -1110,31 +846,26 @@ async def _tool_create_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: create a new UI automation in core.automation storage."""
-    if not token.allow_automation_write:
+    if not token.allow_automation_write and not token.pass_through:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "create_automation"
 
     config = args.get("config")
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_automation"
 
-    automation_id = "atm_" + uuid.uuid4().hex[:16]
+    automation_id = uuid.uuid4().hex[:16]
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
-    try:
-        validated = await _validate_automation_config(hass, automation_id, config)
-        if validated is None:
-            return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "create_automation"
-    except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "create_automation"
-
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             items.append(config)
-            await hass.async_add_executor_job(_write_automations_yaml, path, items)
+            data["items"] = items
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("create_automation failed: %s", exc)
@@ -1147,7 +878,7 @@ async def _tool_edit_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: replace the config of an existing UI automation."""
-    if not token.allow_automation_write:
+    if not token.allow_automation_write and not token.pass_through:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "edit_automation"
 
     automation_id = args.get("automation_id", "").strip()
@@ -1161,23 +892,18 @@ async def _tool_edit_automation(
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
-    try:
-        validated = await _validate_automation_config(hass, automation_id, config)
-        if validated is None:
-            return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "edit_automation"
-    except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "edit_automation"
-
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             idx = next((i for i, a in enumerate(items) if a.get("id") == automation_id), None)
             if idx is None:
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "edit_automation"
             items[idx] = config
-            await hass.async_add_executor_job(_write_automations_yaml, path, items)
+            data["items"] = items
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("edit_automation failed: %s", exc)
@@ -1190,134 +916,30 @@ async def _tool_delete_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: permanently delete a UI automation."""
-    if not token.allow_automation_write:
+    if not token.allow_automation_write and not token.pass_through:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "delete_automation"
 
     automation_id = args.get("automation_id", "").strip()
     if not automation_id:
         return _tool_error("automation_id is required."), "invalid_request", "delete_automation"
 
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             filtered = [a for a in items if a.get("id") != automation_id]
             if len(filtered) == len(items):
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "delete_automation"
-            await hass.async_add_executor_job(_write_automations_yaml, path, filtered)
+            data["items"] = filtered
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("delete_automation failed: %s", exc)
         return _tool_error(f"Failed to delete automation: {exc}"), "denied", "delete_automation"
 
     return _tool_success(f"Automation '{automation_id}' deleted successfully."), "allowed", "delete_automation"
-
-
-async def _tool_create_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: create a new script in scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "create_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "create_script"
-
-    config = args.get("config")
-    if not isinstance(config, dict):
-        return _tool_error("config must be an object."), "invalid_request", "create_script"
-
-    try:
-        validated = await _validate_script_config(hass, script_id, config)
-        if validated is None:
-            return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "create_script"
-    except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "create_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id in scripts:
-                return _tool_error(f"A script with id '{script_id}' already exists. Use edit_script to update it."), "invalid_request", "create_script"
-            scripts[script_id] = config
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("create_script failed: %s", exc)
-        return _tool_error(f"Failed to create script: {exc}"), "denied", "create_script"
-
-    return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "create_script"
-
-
-async def _tool_edit_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: replace the config of an existing script in scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "edit_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "edit_script"
-
-    config = args.get("config")
-    if not isinstance(config, dict):
-        return _tool_error("config must be an object."), "invalid_request", "edit_script"
-
-    try:
-        validated = await _validate_script_config(hass, script_id, config)
-        if validated is None:
-            return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "edit_script"
-    except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "edit_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id not in scripts:
-                return _tool_error(f"No script found with id '{script_id}'."), "denied", "edit_script"
-            scripts[script_id] = config
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("edit_script failed: %s", exc)
-        return _tool_error(f"Failed to edit script: {exc}"), "denied", "edit_script"
-
-    return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "edit_script"
-
-
-async def _tool_delete_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: permanently delete a script from scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "delete_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "delete_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id not in scripts:
-                return _tool_error(f"No script found with id '{script_id}'."), "denied", "delete_script"
-            del scripts[script_id]
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("delete_script failed: %s", exc)
-        return _tool_error(f"Failed to delete script: {exc}"), "denied", "delete_script"
-
-    return _tool_success(f"Script '{script_id}' deleted successfully."), "allowed", "delete_script"
 
 
 async def _tool_restart_ha(
@@ -1374,10 +996,6 @@ def _yaml_scalar(value: Any) -> str:
     if isinstance(value, int):
         return f"'{value}'"
     if isinstance(value, float):
-        if math.isnan(value):
-            return ".nan"
-        if math.isinf(value):
-            return ".inf" if value > 0 else "-.inf"
         return str(value)
     s = str(value)
     if not s:
@@ -1416,7 +1034,7 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
     for state in accessible:
         friendly_name = state.attributes.get("friendly_name") or state.entity_id
         domain = state.entity_id.split(".")[0]
-        lines.append(f"- names: {_yaml_scalar(friendly_name)}")
+        lines.append(f"- names: {friendly_name}")
         lines.append(f"  domain: {domain}")
         lines.append(f"  state: {_yaml_scalar(state.state)}")
 
@@ -1430,7 +1048,7 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
                 if device and device.area_id:
                     area_id = device.area_id
         if area_id and area_id in area_names:
-            lines.append(f"  areas: {_yaml_scalar(area_names[area_id])}")
+            lines.append(f"  areas: {area_names[area_id]}")
 
         attr_lines: list[str] = []
         for attr_key in _LIVE_CONTEXT_ATTRS:
@@ -1809,12 +1427,13 @@ async def _tool_hass_broadcast(
     if not message:
         return _tool_error("Missing required argument: message"), "invalid_request", "HassBroadcast"
 
+    _ANNOUNCE_BIT = 2
     targets: list[str] = []
     for state in hass.states.async_all():
         if state.entity_id.split(".")[0] != "assist_satellite":
             continue
         features = state.attributes.get("supported_features", 0)
-        if isinstance(features, int) and (features & ANNOUNCE_BIT):
+        if isinstance(features, int) and (features & _ANNOUNCE_BIT):
             if token.pass_through or resolve(state.entity_id, token, hass) == Permission.WRITE:
                 targets.append(state.entity_id)
 
@@ -1912,14 +1531,6 @@ async def _call_tool(
         return await _tool_hass_stop_moving(arguments, token, hass)
     if tool_name == "HassBroadcast":
         return await _tool_hass_broadcast(arguments, token, hass)
-    if tool_name == "get_logs":
-        return await _tool_get_logs(arguments, token, hass)
-    if tool_name == "create_script":
-        return await _tool_create_script(arguments, token, hass)
-    if tool_name == "edit_script":
-        return await _tool_edit_script(arguments, token, hass)
-    if tool_name == "delete_script":
-        return await _tool_delete_script(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -1953,12 +1564,9 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
         "capability_flags": {
             "allow_config_read": token.allow_config_read,
             "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
-            "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
-            "allow_log_read": token.allow_log_read,
         },
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
@@ -2006,13 +1614,10 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines.append("")
     lines.append("Capability flags enabled for this token:")
     lines.append(f"- Config read: {'yes' if (token.allow_config_read or token.pass_through) else 'no'}")
-    lines.append(f"- Automation write: {'yes' if token.allow_automation_write else 'no'}")
-    lines.append(f"- Script write: {'yes' if token.allow_script_write else 'no'}")
+    lines.append(f"- Automation write: {'yes' if (token.allow_automation_write or token.pass_through) else 'no'}")
     lines.append(f"- Template render: {'yes' if (token.allow_template_render or token.pass_through) else 'no'}")
     lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
-    lines.append(f"- Physical control (locks/alarms/covers): {'yes' if token.allow_physical_control else 'no'}")
     lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
-    lines.append(f"- Log read: {'yes' if token.allow_log_read else 'no'}")
     lines.append("")
     if token.rate_limit_requests > 0:
         lines.append(
@@ -2066,12 +1671,9 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
         "capability_flags": {
             "allow_config_read": token.allow_config_read,
             "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
-            "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
-            "allow_log_read": token.allow_log_read,
         },
         "rate_limit": {
             "requests_per_minute": token.rate_limit_requests,
@@ -2103,7 +1705,7 @@ async def _dispatch_mcp(
         resp = _jsonrpc_result(msg_id, {
             "protocolVersion": protocol_version,
             "capabilities": {
-                "tools": {"listChanged": True},
+                "tools": {},
                 "resources": {"subscribe": False},
             },
             "serverInfo": {"name": "ATM", "version": ATM_VERSION},
@@ -2127,10 +1729,7 @@ async def _dispatch_mcp(
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
             flag = tool_def["flag"]
-            if flag in _PASS_THROUGH_EXEMPT_FLAGS:
-                flag_enabled = getattr(token, flag, False)
-            else:
-                flag_enabled = token.pass_through or getattr(token, flag, False)
+            flag_enabled = token.pass_through or getattr(token, flag, False)
             if flag_enabled:
                 tools.append({k: v for k, v in tool_def.items() if k != "flag"})
         resp = _jsonrpc_result(msg_id, {"tools": tools})
@@ -2305,9 +1904,7 @@ class ATMMcpSseView(HomeAssistantView):
         if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
             _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
                  outcome="rate_limited", client_ip=client_ip)
-            resp = _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
-            resp.headers["Retry-After"] = "60"
-            return resp
+            return _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
 
         data.store.update_last_used(token.id, utcnow())
 

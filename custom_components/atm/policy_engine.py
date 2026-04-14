@@ -57,8 +57,6 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
     entry = registry.async_get(entity_id)
     if entry:
         entity_id = entry.entity_id
-        # Re-fetch entry for canonical ID so device_id lookup is authoritative.
-        entry = registry.async_get(entity_id)
 
     domain = entity_id.split(".")[0]
 
@@ -220,8 +218,12 @@ def resolve_service_targets(
     service_domain: str,
     token: TokenRecord,
     hass: HomeAssistant,
-) -> list[str]:
+) -> tuple[list[str], int]:
     """Resolve service call targets to a WRITE-permitted, deduplicated entity_id list.
+
+    Returns (permitted_entities, raw_count) where raw_count is the number of
+    candidate entities before permission filtering. This avoids a second call to
+    expand_service_targets just to populate X-ATM-Entities-Requested.
 
     Raises:
         EntityCreationNotPermitted: if an explicit entity_id is not in the entity registry.
@@ -248,6 +250,8 @@ def resolve_service_targets(
             raise EntityCreationNotPermitted(eid)
         candidates.add(eid)
 
+    raw_count = len(candidates)
+
     # Deduplicate while preserving order, then filter to WRITE-permitted entities
     seen: set[str] = set()
     permitted: list[str] = []
@@ -258,7 +262,7 @@ def resolve_service_targets(
         if resolve(eid, token, hass) == Permission.WRITE:
             permitted.append(eid)
 
-    return permitted
+    return permitted, raw_count
 
 
 def filter_service_response(
@@ -278,10 +282,12 @@ def filter_service_response(
             if perm in (Permission.NO_ACCESS, Permission.DENY, Permission.NOT_FOUND):
                 return "<redacted>"
             return response_data
-        if isinstance(response_data, dict):
-            return {}
-        if isinstance(response_data, list):
-            return []
+        if isinstance(response_data, (dict, list)):
+            _LOGGER.warning(
+                "filter_service_response: depth limit reached, truncating %s to empty",
+                type(response_data).__name__,
+            )
+            return {} if isinstance(response_data, dict) else []
         return response_data
     if isinstance(response_data, str):
         if _ENTITY_ID_RE.match(response_data):
@@ -374,3 +380,94 @@ def parse_relative_time(value: str) -> datetime:
     else:
         delta = timedelta(days=30 * n)
     return utcnow() - delta
+
+
+def resolve_intent_entities(
+    hass: HomeAssistant,
+    token: TokenRecord,
+    *,
+    domains: list[str] | None = None,
+    device_classes: list[str] | None = None,
+    name: str | None = None,
+    area: str | None = None,
+    floor: str | None = None,
+) -> list[str]:
+    """Resolve intent-based targeting (area/name/floor/domain/device_class) to entity_id list.
+
+    Silently drops entities the token cannot WRITE. Never acknowledges blocked or
+    inaccessible entities. Returns an empty list when nothing matches.
+    """
+    er_inst = er.async_get(hass)
+    ar_inst = ar.async_get(hass)
+    dr_inst = dr.async_get(hass)
+
+    states = list(hass.states.async_all())
+
+    if domains:
+        domain_set = set(domains)
+        states = [s for s in states if s.entity_id.split(".")[0] in domain_set]
+
+    if device_classes:
+        dc_set = set(device_classes)
+        states = [s for s in states if s.attributes.get("device_class") in dc_set]
+
+    if floor:
+        floor_lower = floor.lower()
+        floor_area_ids: set[str] = set()
+        for a in ar_inst.async_list_areas():
+            fid = getattr(a, "floor_id", None)
+            if fid and fid.lower() == floor_lower:
+                floor_area_ids.add(a.id)
+        if not floor_area_ids:
+            return []
+        floor_entity_ids: set[str] = set()
+        for entry in er_inst.entities.values():
+            if entry.disabled_by:
+                continue
+            if entry.area_id in floor_area_ids:
+                floor_entity_ids.add(entry.entity_id)
+            elif entry.device_id:
+                device = dr_inst.async_get(entry.device_id)
+                if device and device.area_id in floor_area_ids:
+                    floor_entity_ids.add(entry.entity_id)
+        states = [s for s in states if s.entity_id in floor_entity_ids]
+
+    if area:
+        area_lower = area.lower()
+        target_area = None
+        for a in ar_inst.async_list_areas():
+            if a.id == area or a.name.lower() == area_lower:
+                target_area = a
+                break
+        if target_area is None:
+            return []
+        area_entity_ids: set[str] = set()
+        for entry in er_inst.entities.values():
+            if entry.disabled_by:
+                continue
+            if entry.area_id == target_area.id:
+                area_entity_ids.add(entry.entity_id)
+            elif entry.device_id:
+                device = dr_inst.async_get(entry.device_id)
+                if device and device.area_id == target_area.id:
+                    area_entity_ids.add(entry.entity_id)
+        states = [s for s in states if s.entity_id in area_entity_ids]
+
+    if name:
+        name_lower = name.lower()
+        states = [
+            s for s in states
+            if name_lower in s.attributes.get("friendly_name", "").lower()
+        ]
+
+    result: list[str] = []
+    for s in states:
+        eid = s.entity_id
+        if eid.split(".")[0] in BLOCKED_DOMAINS:
+            continue
+        if token.pass_through:
+            result.append(eid)
+        elif resolve(eid, token, hass) == Permission.WRITE:
+            result.append(eid)
+
+    return result

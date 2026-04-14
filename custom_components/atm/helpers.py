@@ -179,11 +179,9 @@ async def get_authenticated_token(
     if token is None:
         return _401
 
-    if token.revoked:
-        return _401
-
-    if token.is_expired():
-        await archive_expired_token(hass, data, token)
+    if not token.is_valid():
+        if token.is_expired():
+            await archive_expired_token(hass, data, token)
         return _401
 
     # Update last_used before the rate limit check so last_access reflects every
@@ -296,6 +294,24 @@ async def terminate_token_connections(
             except asyncio.QueueEmpty:
                 pass
             queue.put_nowait(None)
+
+
+def notify_tools_list_changed(
+    token_id: str,
+    sse_connections: dict[str, set[asyncio.Queue]],
+) -> None:
+    """Push a notifications/tools/list_changed MCP notification to all SSE sessions for a token.
+
+    Non-blocking - uses put_nowait and silently drops if a queue is full.
+    Does not remove connections from the registry.
+    """
+    notification = {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    queues = sse_connections.get(token_id, set())
+    for queue in queues:
+        try:
+            queue.put_nowait(notification)
+        except asyncio.QueueFull:
+            pass
 
 
 class _ContextProxy(dict):

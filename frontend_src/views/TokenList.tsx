@@ -117,6 +117,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                 <th>Mode</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th>Last Updated</th>
                 <th>Expires</th>
                 <th>Last Used</th>
                 <th>Rate Limit</th>
@@ -126,7 +127,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", color: "var(--secondary-text-color, #9e9e9e)" }}>
+                  <td colSpan={9} style={{ textAlign: "center", color: "var(--secondary-text-color, #9e9e9e)" }}>
                     {filter ? "No tokens match the filter." : "No tokens yet. Create one to get started."}
                   </td>
                 </tr>
@@ -149,7 +150,8 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                       )}
                     </td>
                     <td><span className={`badge ${statusClass}`}>{status}</span></td>
-                    <td>{formatDate(t.created_at)}</td>
+                    <td title={t.created_at ? new Date(t.created_at).toLocaleString() : undefined}>{formatDate(t.created_at)}</td>
+                    <td title={t.updated_at ? new Date(t.updated_at).toLocaleString() : undefined}>{relativeTime(t.updated_at)}</td>
                     <td>{formatDate(t.expires_at)}</td>
                     <td>{relativeTime(t.last_used_at)}</td>
                     <td>

@@ -58,7 +58,7 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
                 {entry.request_id.slice(0, 8)}...
               </td>
               <td style={{ whiteSpace: "nowrap" }}>{formatTs(entry.timestamp)}</td>
-              <td>{entry.token_name}</td>
+              <td>{entry.token_name.replace(/^(admin):(.+)$/, "$1 ($2)")}</td>
               <td style={{ fontFamily: "monospace", fontSize: 12 }}>{entry.method}</td>
               <td style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {entry.resource}

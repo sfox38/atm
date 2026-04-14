@@ -12,12 +12,12 @@ from typing import Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.http.const import KEY_HASS_USER
+from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
 from .data import ATMData
-from .helpers import terminate_token_connections
+from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
 from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES, token_name_slug
 
@@ -41,7 +41,7 @@ def _ok(body: Any, status: int = 200, request_id: str = "") -> web.Response:
     return web.Response(
         status=status,
         content_type="application/json",
-        text=json.dumps(body),
+        text=json.dumps(body, default=str),
         headers={"X-ATM-Request-ID": rid},
     )
 
@@ -57,10 +57,13 @@ def require_admin(method):
         request_id = str(uuid.uuid4())
         request["atm_rid"] = request_id
         user = request.get(KEY_HASS_USER)
+        if not request.get(KEY_AUTHENTICATED):
+            _LOGGER.info("Admin %s %s unauthenticated rid=%s", request.method, request.path, request_id)
+            return _err("unauthorized", "Authentication required.", 401, request_id)
         if not user or not user.is_admin:
-            _LOGGER.debug("Admin %s %s unauthorized rid=%s", request.method, request.path, request_id)
+            _LOGGER.info("Admin %s %s forbidden rid=%s", request.method, request.path, request_id)
             return _err("forbidden", "Admin access required.", 403, request_id)
-        _LOGGER.debug("Admin %s %s rid=%s user=%s", request.method, request.path, request_id, user.id)
+        _LOGGER.info("Admin %s %s rid=%s user=%s", request.method, request.path, request_id, user.id)
         return await method(self, request, **kwargs)
     return wrapper
 
@@ -312,6 +315,17 @@ class ATMAdminArchivedTokenView(HomeAssistantView):
         deleted = await data.store.async_delete_archived(token_id)
         if not deleted:
             return _err("not_found", "Archived token not found.", 404, rid)
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
 
@@ -368,7 +382,7 @@ class ATMAdminTokensView(HomeAssistantView):
 
         async with data.store.async_lock:
             if data.store.name_slug_exists(name):
-                return _err("invalid_request", "A token with that name (or equivalent slug) already exists.", 409, rid)
+                return _err("conflict", "A token with that name (or equivalent slug) already exists.", 409, rid)
             record, raw_token = await data.store.async_create_token(
                 name=name,
                 created_by=user.id,
@@ -380,6 +394,17 @@ class ATMAdminTokensView(HomeAssistantView):
 
         if data.async_on_token_created:
             await data.async_on_token_created(record)
+
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
 
         # raw_token is included once in the creation response and never again.
         response_body = record.to_dict()
@@ -429,8 +454,9 @@ class ATMAdminTokenView(HomeAssistantView):
             patchable = {
                 k: v for k, v in body.items()
                 if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
-                         "allow_automation_write", "allow_config_read",
-                         "allow_template_render", "allow_restart", "allow_service_response")
+                         "allow_automation_write", "allow_script_write", "allow_config_read",
+                         "allow_template_render", "allow_restart", "allow_physical_control",
+                         "allow_service_response", "allow_broadcast", "allow_log_read")
             }
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
@@ -442,6 +468,25 @@ class ATMAdminTokenView(HomeAssistantView):
                         return _err("invalid_request", f"{rl_field} must be non-negative.", 400, rid)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
+        _TOOLS_LIST_FLAGS = {
+            "pass_through", "allow_automation_write", "allow_script_write",
+            "allow_config_read", "allow_template_render", "allow_restart",
+            "allow_physical_control", "allow_broadcast", "allow_log_read",
+        }
+        if patchable.keys() & _TOOLS_LIST_FLAGS:
+            notify_tools_list_changed(token_id, data.sse_connections)
+
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
         return _ok(updated.to_dict(), request_id=rid)
 
     @require_admin
@@ -465,12 +510,12 @@ class ATMAdminTokenView(HomeAssistantView):
             if archived is None:
                 return _err("not_found", "Token not found.", 404, rid)
 
+            cancel_expiry_timer(data, token_id)
+
         await terminate_token_connections(token_id, data.sse_connections)
         data.rate_limiter.destroy(token_id)
         data.rate_limit_notified.pop(token_id, None)
         data.token_counters.pop(token_id, None)
-        from .helpers import cancel_expiry_timer
-        cancel_expiry_timer(data, token_id)
 
         hass.bus.async_fire("atm_token_revoked", {
             "token_id": token_id,
@@ -478,6 +523,17 @@ class ATMAdminTokenView(HomeAssistantView):
             "revoked_by": user.id,
             "timestamp": now.isoformat(),
         })
+
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
 
         slug = token_name_slug(token_name)
         if data.async_on_token_archived:
@@ -527,6 +583,18 @@ class ATMAdminPermissionsView(HomeAssistantView):
                 return _err("not_found", "Token not found.", 404, rid)
 
             updated = await data.store.async_set_permissions(token_id, new_tree)
+
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
         return _ok(updated.permissions.to_dict(), request_id=rid)
 
 
@@ -605,6 +673,17 @@ async def _patch_permission_node(
             token_id, node_type, node_id, state, hint
         )
 
+    user = request[KEY_HASS_USER]
+    data.audit.record(
+        request_id=rid,
+        token_id="admin",
+        token_name=f"admin:{user.id}",
+        method=request.method,
+        resource=request.path,
+        outcome="allowed",
+        client_ip=request.remote or "",
+        settings=data.store.get_settings(),
+    )
     return _ok(updated.permissions.to_dict(), request_id=rid)
 
 
@@ -684,8 +763,12 @@ class ATMAdminScopeView(HomeAssistantView):
             "capability_flags": {
                 "allow_config_read": token.allow_config_read,
                 "allow_automation_write": token.allow_automation_write,
+                "allow_script_write": token.allow_script_write,
                 "allow_template_render": token.allow_template_render,
                 "allow_restart": token.allow_restart,
+                "allow_physical_control": token.allow_physical_control,
+                "allow_broadcast": token.allow_broadcast,
+                "allow_log_read": token.allow_log_read,
             },
         }, request_id=rid)
 
@@ -711,7 +794,16 @@ class ATMAdminEntityTreeView(HomeAssistantView):
                 data.entity_tree_cache = await _build_entity_tree(hass)
                 data.entity_tree_cache_valid = True
 
-        return _ok(data.entity_tree_cache, request_id=rid)
+        import functools
+        json_body = await hass.async_add_executor_job(
+            functools.partial(json.dumps, data.entity_tree_cache, default=str)
+        )
+        return web.Response(
+            status=200,
+            content_type="application/json",
+            text=json_body,
+            headers={"X-ATM-Request-ID": rid},
+        )
 
 
 class ATMAdminTokenStatsView(HomeAssistantView):
@@ -892,6 +984,17 @@ class ATMAdminSettingsView(HomeAssistantView):
                     await data.async_register_routes()
                     data.routes_registered = True
 
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=updated,
+        )
         return _ok(updated.to_dict(), request_id=rid)
 
 
@@ -914,6 +1017,7 @@ class ATMAdminWipeView(HomeAssistantView):
 
         hass = self.hass
         data: ATMData = hass.data[DOMAIN]
+        user = request[KEY_HASS_USER]
 
         for token_id in list(data.sse_connections.keys()):
             await terminate_token_connections(token_id, data.sse_connections)
@@ -955,6 +1059,22 @@ class ATMAdminWipeView(HomeAssistantView):
         # tokens, there are no valid sensors left regardless.
         data.token_id_sensors.clear()
 
+        # Second pass: terminate any SSE connections established during the race window
+        # between the first termination pass and the storage wipe completing.
+        for token_id in list(data.sse_connections.keys()):
+            await terminate_token_connections(token_id, data.sse_connections)
+
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
+
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
 
@@ -980,12 +1100,25 @@ class ATMAdminTokenRotateView(HomeAssistantView):
 
         token, raw_token = result
 
+        await terminate_token_connections(token_id, data.sse_connections)
+
         hass.bus.async_fire("atm_token_rotated", {
             "token_id": token.id,
             "token_name": token.name,
             "rotated_by": user.id,
             "timestamp": utcnow().isoformat(),
         })
+
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
 
         response_body = token.to_dict()
         response_body["token"] = raw_token

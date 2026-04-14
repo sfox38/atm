@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from homeassistant.core import HomeAssistant
-
-_LOGGER = logging.getLogger(__name__)
 from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import parse_datetime, utcnow
 
@@ -26,6 +24,7 @@ from .const import (
     TOKEN_PREFIX,
 )
 
+_LOGGER = logging.getLogger(__name__)
 
 _VALID_NODE_STATES = frozenset({"GREY", "YELLOW", "GREEN", "RED"})
 
@@ -98,14 +97,19 @@ class TokenRecord:
     expires_at: datetime | None = None
     revoked: bool = False
     last_used_at: datetime | None = None
+    updated_at: datetime | None = None
     pass_through: bool = False
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
     allow_automation_write: bool = False
+    allow_script_write: bool = False
     allow_config_read: bool = False
     allow_template_render: bool = False
     allow_restart: bool = False
+    allow_physical_control: bool = False
     allow_service_response: bool = False
+    allow_broadcast: bool = False
+    allow_log_read: bool = False
     permissions: PermissionTree = field(default_factory=PermissionTree)
 
     def to_dict(self) -> dict:
@@ -117,14 +121,19 @@ class TokenRecord:
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "revoked": self.revoked,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "pass_through": self.pass_through,
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
             "allow_automation_write": self.allow_automation_write,
+            "allow_script_write": self.allow_script_write,
             "allow_config_read": self.allow_config_read,
             "allow_template_render": self.allow_template_render,
             "allow_restart": self.allow_restart,
+            "allow_physical_control": self.allow_physical_control,
             "allow_service_response": self.allow_service_response,
+            "allow_broadcast": self.allow_broadcast,
+            "allow_log_read": self.allow_log_read,
             "permissions": self.permissions.to_dict(),
         }
 
@@ -148,10 +157,15 @@ class TokenRecord:
             rate_limit_requests=data.get("rate_limit_requests", DEFAULT_RATE_LIMIT_REQUESTS),
             rate_limit_burst=data.get("rate_limit_burst", DEFAULT_RATE_LIMIT_BURST),
             allow_automation_write=data.get("allow_automation_write", False),
+            allow_script_write=data.get("allow_script_write", False),
             allow_config_read=data.get("allow_config_read", False),
             allow_template_render=data.get("allow_template_render", False),
             allow_restart=data.get("allow_restart", False),
+            allow_physical_control=data.get("allow_physical_control", False),
             allow_service_response=data.get("allow_service_response", False),
+            allow_broadcast=data.get("allow_broadcast", False),
+            allow_log_read=data.get("allow_log_read", False),
+            updated_at=_parse_dt(data.get("updated_at")),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
         )
 
@@ -213,6 +227,14 @@ class ArchivedTokenRecord:
         )
 
 
+def _clamp_int(value: object, valid: set[int], default: int) -> int:
+    try:
+        converted = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return converted if converted in valid else default
+
+
 @dataclass
 class GlobalSettings:
     """Integration-wide settings persisted to storage."""
@@ -253,8 +275,8 @@ class GlobalSettings:
             log_entity_names=bool(data.get("log_entity_names", True)),
             log_client_ip=bool(data.get("log_client_ip", True)),
             notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
-            audit_flush_interval=int(data.get("audit_flush_interval", 15)),
-            audit_log_maxlen=int(data.get("audit_log_maxlen", 10000)),
+            audit_flush_interval=_clamp_int(data.get("audit_flush_interval"), {0, 5, 10, 15, 30, 60}, 15),
+            audit_log_maxlen=_clamp_int(data.get("audit_log_maxlen"), {100, 1000, 5000, 10000}, 10000),
         )
 
 
@@ -325,16 +347,18 @@ class TokenStore:
         """
         raw_token = TOKEN_PREFIX + secrets.token_hex(TOKEN_HEX_LENGTH // 2)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        now = utcnow()
         record = TokenRecord(
             id=str(uuid.uuid4()),
             name=name,
             token_hash=token_hash,
-            created_at=utcnow(),
+            created_at=now,
             created_by=created_by,
             expires_at=expires_at,
             pass_through=pass_through,
             rate_limit_requests=rate_limit_requests,
             rate_limit_burst=rate_limit_burst if rate_limit_requests > 0 else 0,
+            updated_at=now,
         )
         self._tokens[record.id] = record
         await self.async_save()
@@ -417,16 +441,21 @@ class TokenStore:
             "rate_limit_requests",
             "rate_limit_burst",
             "allow_automation_write",
+            "allow_script_write",
             "allow_config_read",
             "allow_template_render",
             "allow_restart",
+            "allow_physical_control",
             "allow_service_response",
+            "allow_broadcast",
+            "allow_log_read",
         }
         for key, value in kwargs.items():
             if key in mutable_fields:
                 setattr(token, key, value)
         if token.rate_limit_requests == 0:
             token.rate_limit_burst = 0
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -440,6 +469,7 @@ class TokenStore:
         if token is None:
             return None
         token.permissions = permissions
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -468,6 +498,7 @@ class TokenStore:
             collection.pop(node_id, None)
         else:
             collection[node_id] = PermissionNode(state=state, hint=hint)
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -506,6 +537,7 @@ class TokenStore:
             return None
         raw_token = TOKEN_PREFIX + secrets.token_hex(TOKEN_HEX_LENGTH // 2)
         token.token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        token.updated_at = utcnow()
         await self.async_save()
         return token, raw_token
 

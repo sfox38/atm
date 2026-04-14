@@ -22,14 +22,18 @@ export interface TokenRecord {
   expires_at: string | null;
   revoked: boolean;
   last_used_at: string | null;
+  updated_at: string | null;
   pass_through: boolean;
   rate_limit_requests: number;
   rate_limit_burst: number;
   allow_automation_write: boolean;
+  allow_script_write: boolean;
+  allow_log_read: boolean;
   allow_config_read: boolean;
   allow_template_render: boolean;
   allow_restart: boolean;
   allow_service_response: boolean;
+  allow_broadcast: boolean;
   permissions: PermissionTree;
 }
 
@@ -129,6 +133,7 @@ export interface ScopeResult {
   capability_flags: {
     allow_config_read: boolean;
     allow_automation_write: boolean;
+    allow_script_write: boolean;
     allow_template_render: boolean;
     allow_restart: boolean;
   };
@@ -149,10 +154,13 @@ export interface PatchTokenBody {
   rate_limit_requests?: number;
   rate_limit_burst?: number;
   allow_automation_write?: boolean;
+  allow_script_write?: boolean;
+  allow_log_read?: boolean;
   allow_config_read?: boolean;
   allow_template_render?: boolean;
   allow_restart?: boolean;
   allow_service_response?: boolean;
+  allow_broadcast?: boolean;
 }
 
 export interface PermissionPatchBody {
@@ -190,6 +198,7 @@ declare global {
         active?: boolean;
         size?: string;
       };
+      "ha-menu-button": React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
     }
   }
 }
