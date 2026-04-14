@@ -7,25 +7,17 @@ import functools
 import hashlib
 import json
 import logging
-import os
 import re
 import uuid
 from typing import Any
 
 from aiohttp import web
-from homeassistant.components.automation.config import (
-    async_validate_config_item as _validate_automation_config,
-)
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.script.config import (
-    async_validate_config_item as _validate_script_config,
-)
-from homeassistant.util.file import write_utf8_file_atomic as _write_utf8_file_atomic
-from homeassistant.util.yaml import dump as _yaml_dump, load_yaml as _load_yaml
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store as _Store
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
@@ -76,47 +68,14 @@ _LOGGER = logging.getLogger(__name__)
 _MCP_VERSION_SSE = "2024-11-05"
 _MCP_VERSION_STREAMABLE = "2025-03-26"
 
-_AUTOMATION_YAML = "automations.yaml"
+_AUTOMATION_STORE_KEY = "core.automation"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_automation_write", "allow_script_write"})
-_SCRIPT_CONFIG_PATH = "scripts.yaml"
-_SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
 
 def _get_automation_lock(hass: Any) -> asyncio.Lock:
     if _AUTOMATION_LOCK_KEY not in hass.data:
         hass.data[_AUTOMATION_LOCK_KEY] = asyncio.Lock()
     return hass.data[_AUTOMATION_LOCK_KEY]
-
-
-def _read_automations_yaml(path: str) -> list:
-    if not os.path.isfile(path):
-        return []
-    data = _load_yaml(path)
-    return data if isinstance(data, list) else []
-
-
-def _write_automations_yaml(path: str, data: list) -> None:
-    contents = _yaml_dump(data)
-    _write_utf8_file_atomic(path, contents)
-
-
-def _get_script_lock(hass: Any) -> asyncio.Lock:
-    if _SCRIPT_LOCK_KEY not in hass.data:
-        hass.data[_SCRIPT_LOCK_KEY] = asyncio.Lock()
-    return hass.data[_SCRIPT_LOCK_KEY]
-
-
-def _read_scripts_yaml(path: str) -> dict:
-    if not os.path.isfile(path):
-        return {}
-    data = _load_yaml(path)
-    return data if isinstance(data, dict) else {}
-
-
-def _write_scripts_yaml(path: str, data: dict) -> None:
-    contents = _yaml_dump(data)
-    _write_utf8_file_atomic(path, contents)
 
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
@@ -223,21 +182,16 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_automation",
         "description": (
-            "Create a new Home Assistant automation stored in automations.yaml. "
+            "Create a new Home Assistant automation stored in the UI automation registry. "
+            "Provide the full automation configuration as 'config' (alias, trigger, condition, action, mode, etc.). "
             "Do not include an 'id' field - ATM assigns the ID automatically. "
-            "Returns the saved configuration including the generated automation_id. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'trigger' (list of trigger objects, each with a 'platform' field, required), "
-            "'action' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'condition' (list of condition objects, optional), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional)."
+            "Returns the saved configuration including the generated automation_id."
         ),
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "config": {"type": "object", "description": "Full HA automation configuration (alias, trigger, action, condition, mode). Do not include 'id'."},
+                "config": {"type": "object", "description": "Full HA automation configuration object (alias, trigger, condition, action, mode)."},
             },
             "required": ["config"],
         },
@@ -248,28 +202,21 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "Replace the configuration of an existing Home Assistant automation. "
             "The 'config' object entirely replaces the current automation configuration. "
             "The automation_id is preserved - do not include it in 'config'. "
-            "Returns the updated configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
-            "ATM-created automations have IDs prefixed with 'atm_'."
+            "Returns the updated configuration."
         ),
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "automation_id": {"type": "string", "description": "ID of the automation to edit, as returned by create_automation or get_config."},
-                "config": {"type": "object", "description": "Full replacement automation configuration (alias, trigger, action, condition, mode). Do not include 'id'."},
+                "config": {"type": "object", "description": "Full replacement automation configuration (alias, trigger, condition, action, mode)."},
             },
             "required": ["automation_id", "config"],
         },
     },
     {
         "name": "delete_automation",
-        "description": (
-            "Permanently delete a Home Assistant automation from automations.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
-            "ATM-created automations have IDs prefixed with 'atm_'."
-        ),
+        "description": "Permanently delete a Home Assistant automation from the UI automation registry.",
         "flag": "allow_automation_write",
         "inputSchema": {
             "type": "object",
@@ -277,63 +224,6 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "automation_id": {"type": "string", "description": "ID of the automation to delete."},
             },
             "required": ["automation_id"],
-        },
-    },
-    {
-        "name": "create_script",
-        "description": (
-            "Create a new Home Assistant script stored in scripts.yaml. "
-            "Provide a unique script_id (slug, e.g. 'morning_routine') - this becomes the entity_id: script.<script_id>. "
-            "Returns the saved configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'sequence' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional), "
-            "'variables' (dict of script-level variables, optional), "
-            "'fields' (dict of input field definitions for callable scripts, optional)."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "Unique slug for the script (e.g. 'morning_routine'). Becomes script.<script_id> in HA. Must not already exist."},
-                "config": {"type": "object", "description": "Full HA script configuration (alias, sequence, mode, variables, fields)."},
-            },
-            "required": ["script_id", "config"],
-        },
-    },
-    {
-        "name": "edit_script",
-        "description": (
-            "Replace the configuration of an existing Home Assistant script. "
-            "The 'config' object entirely replaces the current script configuration. "
-            "Returns the updated configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "ID of the script to edit (the slug, e.g. 'morning_routine')."},
-                "config": {"type": "object", "description": "Full replacement script configuration (alias, sequence, mode, variables, fields)."},
-            },
-            "required": ["script_id", "config"],
-        },
-    },
-    {
-        "name": "delete_script",
-        "description": (
-            "Permanently delete a Home Assistant script from scripts.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
-        ),
-        "flag": "allow_script_write",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "script_id": {"type": "string", "description": "ID of the script to delete (the slug, e.g. 'morning_routine')."},
-            },
-            "required": ["script_id"],
         },
     },
     {
@@ -619,14 +509,6 @@ def _jsonrpc_result(msg_id: Any, result: Any) -> dict:
 def _jsonrpc_error(msg_id: Any, code: int, message: str) -> dict:
     """Wrap an error in a JSON-RPC 2.0 error envelope."""
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
-
-
-def _jsonrpc_notification(method: str, params: dict | None = None) -> dict:
-    """Build a JSON-RPC 2.0 notification (no id field)."""
-    msg: dict = {"jsonrpc": "2.0", "method": method}
-    if params is not None:
-        msg["params"] = params
-    return msg
 
 
 def _tool_success(text: str) -> dict:
@@ -964,31 +846,26 @@ async def _tool_create_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: create a new UI automation in core.automation storage."""
-    if not token.allow_automation_write:
+    if not token.allow_automation_write and not token.pass_through:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "create_automation"
 
     config = args.get("config")
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_automation"
 
-    automation_id = "atm_" + uuid.uuid4().hex[:16]
+    automation_id = uuid.uuid4().hex[:16]
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
-    try:
-        validated = await _validate_automation_config(hass, automation_id, config)
-        if validated is None:
-            return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "create_automation"
-    except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "create_automation"
-
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             items.append(config)
-            await hass.async_add_executor_job(_write_automations_yaml, path, items)
+            data["items"] = items
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("create_automation failed: %s", exc)
@@ -1015,23 +892,18 @@ async def _tool_edit_automation(
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
-    try:
-        validated = await _validate_automation_config(hass, automation_id, config)
-        if validated is None:
-            return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "edit_automation"
-    except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "edit_automation"
-
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             idx = next((i for i, a in enumerate(items) if a.get("id") == automation_id), None)
             if idx is None:
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "edit_automation"
             items[idx] = config
-            await hass.async_add_executor_job(_write_automations_yaml, path, items)
+            data["items"] = items
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("edit_automation failed: %s", exc)
@@ -1052,127 +924,22 @@ async def _tool_delete_automation(
         return _tool_error("automation_id is required."), "invalid_request", "delete_automation"
 
     lock = _get_automation_lock(hass)
-    path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
-    lock = _get_automation_lock(hass)
     try:
         async with lock:
-            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            store = _Store(hass, 1, _AUTOMATION_STORE_KEY)
+            data = await store.async_load() or {"items": []}
+            items = data.get("items", [])
             filtered = [a for a in items if a.get("id") != automation_id]
             if len(filtered) == len(items):
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "delete_automation"
-            await hass.async_add_executor_job(_write_automations_yaml, path, filtered)
+            data["items"] = filtered
+            await store.async_save(data)
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("delete_automation failed: %s", exc)
         return _tool_error(f"Failed to delete automation: {exc}"), "denied", "delete_automation"
 
     return _tool_success(f"Automation '{automation_id}' deleted successfully."), "allowed", "delete_automation"
-
-
-async def _tool_create_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: create a new script in scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "create_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "create_script"
-
-    config = args.get("config")
-    if not isinstance(config, dict):
-        return _tool_error("config must be an object."), "invalid_request", "create_script"
-
-    try:
-        validated = await _validate_script_config(hass, script_id, config)
-        if validated is None:
-            return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "create_script"
-    except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "create_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id in scripts:
-                return _tool_error(f"A script with id '{script_id}' already exists. Use edit_script to update it."), "invalid_request", "create_script"
-            scripts[script_id] = config
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("create_script failed: %s", exc)
-        return _tool_error(f"Failed to create script: {exc}"), "denied", "create_script"
-
-    return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "create_script"
-
-
-async def _tool_edit_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: replace the config of an existing script in scripts.yaml."""
-    if not token.allow_script_write and not token.pass_through:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "edit_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "edit_script"
-
-    config = args.get("config")
-    if not isinstance(config, dict):
-        return _tool_error("config must be an object."), "invalid_request", "edit_script"
-
-    try:
-        validated = await _validate_script_config(hass, script_id, config)
-        if validated is None:
-            return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "edit_script"
-    except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "edit_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id not in scripts:
-                return _tool_error(f"No script found with id '{script_id}'."), "denied", "edit_script"
-            scripts[script_id] = config
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("edit_script failed: %s", exc)
-        return _tool_error(f"Failed to edit script: {exc}"), "denied", "edit_script"
-
-    return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "edit_script"
-
-
-async def _tool_delete_script(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: permanently delete a script from scripts.yaml."""
-    if not token.allow_script_write and not token.pass_through:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "delete_script"
-
-    script_id = args.get("script_id", "").strip()
-    if not script_id:
-        return _tool_error("script_id is required."), "invalid_request", "delete_script"
-
-    path = hass.config.path(_SCRIPT_CONFIG_PATH)
-    lock = _get_script_lock(hass)
-    try:
-        async with lock:
-            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
-            if script_id not in scripts:
-                return _tool_error(f"No script found with id '{script_id}'."), "denied", "delete_script"
-            del scripts[script_id]
-            await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
-        await hass.services.async_call("script", "reload", blocking=True)
-    except Exception as exc:
-        _LOGGER.error("delete_script failed: %s", exc)
-        return _tool_error(f"Failed to delete script: {exc}"), "denied", "delete_script"
-
-    return _tool_success(f"Script '{script_id}' deleted successfully."), "allowed", "delete_script"
 
 
 async def _tool_restart_ha(
@@ -1764,12 +1531,6 @@ async def _call_tool(
         return await _tool_hass_stop_moving(arguments, token, hass)
     if tool_name == "HassBroadcast":
         return await _tool_hass_broadcast(arguments, token, hass)
-    if tool_name == "create_script":
-        return await _tool_create_script(arguments, token, hass)
-    if tool_name == "edit_script":
-        return await _tool_edit_script(arguments, token, hass)
-    if tool_name == "delete_script":
-        return await _tool_delete_script(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -1803,7 +1564,6 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
         "capability_flags": {
             "allow_config_read": token.allow_config_read,
             "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
             "allow_broadcast": token.allow_broadcast,
@@ -1854,8 +1614,7 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines.append("")
     lines.append("Capability flags enabled for this token:")
     lines.append(f"- Config read: {'yes' if (token.allow_config_read or token.pass_through) else 'no'}")
-    lines.append(f"- Automation write: {'yes' if token.allow_automation_write else 'no'}")
-    lines.append(f"- Script write: {'yes' if token.allow_script_write else 'no'}")
+    lines.append(f"- Automation write: {'yes' if (token.allow_automation_write or token.pass_through) else 'no'}")
     lines.append(f"- Template render: {'yes' if (token.allow_template_render or token.pass_through) else 'no'}")
     lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
     lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
@@ -1912,7 +1671,6 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
         "capability_flags": {
             "allow_config_read": token.allow_config_read,
             "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
             "allow_broadcast": token.allow_broadcast,
@@ -1947,7 +1705,7 @@ async def _dispatch_mcp(
         resp = _jsonrpc_result(msg_id, {
             "protocolVersion": protocol_version,
             "capabilities": {
-                "tools": {"listChanged": True},
+                "tools": {},
                 "resources": {"subscribe": False},
             },
             "serverInfo": {"name": "ATM", "version": ATM_VERSION},
@@ -1971,10 +1729,7 @@ async def _dispatch_mcp(
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
             flag = tool_def["flag"]
-            if flag in _PASS_THROUGH_EXEMPT_FLAGS:
-                flag_enabled = getattr(token, flag, False)
-            else:
-                flag_enabled = token.pass_through or getattr(token, flag, False)
+            flag_enabled = token.pass_through or getattr(token, flag, False)
             if flag_enabled:
                 tools.append({k: v for k, v in tool_def.items() if k != "flag"})
         resp = _jsonrpc_result(msg_id, {"tools": tools})

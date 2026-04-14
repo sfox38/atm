@@ -131,9 +131,17 @@ ATM is a drop-in replacement for the native HA MCP server. It exposes all 20 nat
 | `get_config` - HA configuration info | `allow_config_read` |
 | `restart_ha` - restart Home Assistant | `allow_restart` |
 | `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
-| `create_automation`, `edit_automation`, `delete_automation` | `allow_automation_write` (returns a not-implemented error in v1) |
+| `create_automation` - create a new automation in `automations.yaml` | `allow_automation_write` |
+| `edit_automation` - replace an existing automation's configuration | `allow_automation_write` |
+| `delete_automation` - permanently delete an automation | `allow_automation_write` |
+| `create_script` - create a new script in `scripts.yaml` | `allow_script_write` |
+| `edit_script` - replace an existing script's configuration | `allow_script_write` |
+| `delete_script` - permanently delete a script | `allow_script_write` |
 
 Claude can only see and act on entities within the token's permission scope. Native tools silently skip inaccessible entities without revealing they exist.
+
+> [!NOTE]
+> After enabling or disabling a capability flag in the ATM panel, your MCP client must reconnect to receive the updated tool list. In Claude Code, use the `/mcp` menu and select **Reconnect**.
 
 ---
 
@@ -208,11 +216,20 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 | `allow_restart` | `homeassistant.restart` and `homeassistant.stop`. Applies even in pass-through mode. |
 | `allow_config_read` | Reading HA configuration data and the event bus listener list |
 | `allow_template_render` | Rendering Jinja2 templates (permission-scoped environment) |
-| `allow_automation_write` | Automation management (returns a not-implemented error in v1) |
+| `allow_automation_write` | Creating, editing, and deleting automations via the MCP tools. See security note below. |
+| `allow_script_write` | Creating, editing, and deleting scripts via the MCP tools. See security note below. |
 | `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. |
-| `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices. Pass-through tokens bypass this flag. |
+| `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices. |
 
-`allow_restart` is the one capability flag that pass-through mode does not bypass. All other flags, including `allow_broadcast`, are bypassed by pass-through tokens.
+`allow_restart`, `allow_automation_write`, and `allow_script_write` must be explicitly enabled even for pass-through tokens. All other flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed by pass-through tokens.
+
+### Automation and script write flags
+
+`allow_automation_write` and `allow_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully control.
+
+**Why these flags are different:** automation and script payloads are not validated against the token's entity permission tree. A client with `allow_automation_write` enabled can write an automation that references any entity in Home Assistant, regardless of what the token is permitted to access directly. The same applies to scripts. An automation or script that is created, then triggered, runs under HA's own context - not ATM's - so ATM's permission checks do not apply to the triggered actions.
+
+In practice this means a token with a narrow entity scope but `allow_automation_write` enabled could, through a crafted automation, indirectly control entities it cannot access directly. Only enable these flags for clients you would trust with broad HA access.
 
 ---
 
@@ -224,9 +241,13 @@ Pass-through does NOT bypass:
 - The `atm` domain blocklist
 - Sensitive attribute scrubbing
 - Rate limiting
-- The `allow_restart` requirement
+- The `allow_restart` requirement - a pass-through token cannot call `homeassistant.restart` or `homeassistant.stop` without `allow_restart` explicitly enabled.
+- The `allow_automation_write` requirement - a pass-through token cannot create, edit, or delete automations without `allow_automation_write` explicitly enabled.
+- The `allow_script_write` requirement - a pass-through token cannot create, edit, or delete scripts without `allow_script_write` explicitly enabled.
 
-Creating a pass-through token requires confirming your intent in the panel or sending `confirm_pass_through: true` in the API request. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
+These three flags must always be explicitly enabled, regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed by pass-through tokens.
+
+The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true` - this is a required acknowledgment field that prevents accidentally enabling pass-through. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
 
 ---
 
@@ -299,7 +320,7 @@ ATM creates six HA sensor entities for each active token. For a token named `cla
 | `sensor.atm_claude_code_denied_count` | Requests blocked by permission rules |
 | `sensor.atm_claude_code_rate_limit_hits` | Times this token was rate limited |
 | `sensor.atm_claude_code_last_access` | Timestamp of the most recent request |
-| `sensor.atm_claude_code_expires_in` | Days until expiry, or -1 if no expiry |
+| `sensor.atm_claude_code_expires_in` | Days until expiry, or `No expiry` if no expiry is set |
 
 Sensors are removed automatically when a token is revoked. ATM sensors are blocked from all token access. External tools cannot read their own telemetry through ATM.
 

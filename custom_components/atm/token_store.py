@@ -102,6 +102,7 @@ class TokenRecord:
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
     allow_automation_write: bool = False
+    allow_script_write: bool = False
     allow_config_read: bool = False
     allow_template_render: bool = False
     allow_restart: bool = False
@@ -123,6 +124,7 @@ class TokenRecord:
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
             "allow_automation_write": self.allow_automation_write,
+            "allow_script_write": self.allow_script_write,
             "allow_config_read": self.allow_config_read,
             "allow_template_render": self.allow_template_render,
             "allow_restart": self.allow_restart,
@@ -151,6 +153,7 @@ class TokenRecord:
             rate_limit_requests=data.get("rate_limit_requests", DEFAULT_RATE_LIMIT_REQUESTS),
             rate_limit_burst=data.get("rate_limit_burst", DEFAULT_RATE_LIMIT_BURST),
             allow_automation_write=data.get("allow_automation_write", False),
+            allow_script_write=data.get("allow_script_write", False),
             allow_config_read=data.get("allow_config_read", False),
             allow_template_render=data.get("allow_template_render", False),
             allow_restart=data.get("allow_restart", False),
@@ -424,6 +427,7 @@ class TokenStore:
             "rate_limit_requests",
             "rate_limit_burst",
             "allow_automation_write",
+            "allow_script_write",
             "allow_config_read",
             "allow_template_render",
             "allow_restart",

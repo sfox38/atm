@@ -27,6 +27,7 @@ export interface TokenRecord {
   rate_limit_requests: number;
   rate_limit_burst: number;
   allow_automation_write: boolean;
+  allow_script_write: boolean;
   allow_config_read: boolean;
   allow_template_render: boolean;
   allow_restart: boolean;
@@ -131,6 +132,7 @@ export interface ScopeResult {
   capability_flags: {
     allow_config_read: boolean;
     allow_automation_write: boolean;
+    allow_script_write: boolean;
     allow_template_render: boolean;
     allow_restart: boolean;
   };
@@ -151,6 +153,7 @@ export interface PatchTokenBody {
   rate_limit_requests?: number;
   rate_limit_burst?: number;
   allow_automation_write?: boolean;
+  allow_script_write?: boolean;
   allow_config_read?: boolean;
   allow_template_render?: boolean;
   allow_restart?: boolean;
