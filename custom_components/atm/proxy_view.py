@@ -21,6 +21,7 @@ from .const import (
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
     MAX_HISTORY_RANGE_DAYS,
+    PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
@@ -200,6 +201,11 @@ class ATMServiceView(HomeAssistantView):
 
         service_key = f"{domain}/{service}"
         if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip)
+            return _error("forbidden", "Forbidden.", 403, request_id)
+
+        if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)

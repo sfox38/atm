@@ -58,6 +58,23 @@ DUAL_GATE_SERVICES = frozenset({
     "homeassistant/stop",
 })
 
+# Services that require allow_physical_control even when pass_through is True.
+# These represent irreversible or safety-relevant physical actions.
+PHYSICAL_GATE_SERVICES = frozenset({
+    "lock/lock",
+    "lock/unlock",
+    "alarm_control_panel/alarm_disarm",
+    "alarm_control_panel/alarm_arm_away",
+    "alarm_control_panel/alarm_arm_home",
+    "alarm_control_panel/alarm_arm_night",
+    "alarm_control_panel/alarm_arm_vacation",
+    "alarm_control_panel/alarm_trigger",
+    "cover/open_cover",
+    "cover/stop_cover",
+    "cover/set_cover_position",
+    "cover/set_cover_tilt_position",
+})
+
 # assist_satellite feature bit for ANNOUNCE support.
 ANNOUNCE_BIT = 2
 

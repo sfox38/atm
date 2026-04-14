@@ -106,6 +106,7 @@ class TokenRecord:
     allow_config_read: bool = False
     allow_template_render: bool = False
     allow_restart: bool = False
+    allow_physical_control: bool = False
     allow_service_response: bool = False
     allow_broadcast: bool = False
     permissions: PermissionTree = field(default_factory=PermissionTree)
@@ -128,6 +129,7 @@ class TokenRecord:
             "allow_config_read": self.allow_config_read,
             "allow_template_render": self.allow_template_render,
             "allow_restart": self.allow_restart,
+            "allow_physical_control": self.allow_physical_control,
             "allow_service_response": self.allow_service_response,
             "allow_broadcast": self.allow_broadcast,
             "permissions": self.permissions.to_dict(),
@@ -157,6 +159,7 @@ class TokenRecord:
             allow_config_read=data.get("allow_config_read", False),
             allow_template_render=data.get("allow_template_render", False),
             allow_restart=data.get("allow_restart", False),
+            allow_physical_control=data.get("allow_physical_control", False),
             allow_service_response=data.get("allow_service_response", False),
             allow_broadcast=data.get("allow_broadcast", False),
             updated_at=_parse_dt(data.get("updated_at")),

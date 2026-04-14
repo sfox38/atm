@@ -40,6 +40,7 @@ from .const import (
     HIGH_RISK_DOMAINS,
     MAX_HISTORY_RANGE_DAYS,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
+    PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
     SSE_HEARTBEAT_INTERVAL,
@@ -82,7 +83,7 @@ _MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _AUTOMATION_YAML = "automations.yaml"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_automation_write", "allow_script_write"})
+_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write"})
 _SCRIPT_CONFIG_PATH = "scripts.yaml"
 _SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
@@ -824,6 +825,9 @@ async def _tool_call_service(
     if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
         return _tool_error("Forbidden."), "denied", resource
 
+    if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
+        return _tool_error("Forbidden."), "denied", resource
+
     entity_id = args.get("entity_id")
     device_id = args.get("device_id")
     area_id = args.get("area_id")
@@ -832,7 +836,7 @@ async def _tool_call_service(
         service_data = {}
 
     try:
-        permitted_entities = resolve_service_targets(
+        permitted_entities, _requested_count = resolve_service_targets(
             entity_id=entity_id,
             device_id=device_id,
             area_id=area_id,
@@ -1822,6 +1826,7 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
             "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
+            "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
         },
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
@@ -1874,6 +1879,7 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines.append(f"- Script write: {'yes' if token.allow_script_write else 'no'}")
     lines.append(f"- Template render: {'yes' if (token.allow_template_render or token.pass_through) else 'no'}")
     lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
+    lines.append(f"- Physical control (locks/alarms/covers): {'yes' if token.allow_physical_control else 'no'}")
     lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
     lines.append("")
     if token.rate_limit_requests > 0:
@@ -1931,6 +1937,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             "allow_script_write": token.allow_script_write,
             "allow_template_render": token.allow_template_render,
             "allow_restart": token.allow_restart,
+            "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
         },
         "rate_limit": {
