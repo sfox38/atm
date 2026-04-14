@@ -353,6 +353,8 @@ Each entry records a unique request ID (matching the `X-ATM-Request-ID` response
 
 `not_implemented` is recorded when an MCP client calls a method that ATM does not support (for example, `resources/templates/list`). This is a protocol-level gap, not a permission block, and does not increment the token's denied counter.
 
+`invalid_request` is recorded when a request is structurally malformed and rejected before it reaches permission checks - for example, a template render call with a syntax error in the template body.
+
 ### Persistence
 
 The audit log is stored in a separate HA storage file (`.storage/atm_audit.json`) and survives HA restarts.

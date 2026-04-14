@@ -220,8 +220,12 @@ def resolve_service_targets(
     service_domain: str,
     token: TokenRecord,
     hass: HomeAssistant,
-) -> list[str]:
+) -> tuple[list[str], int]:
     """Resolve service call targets to a WRITE-permitted, deduplicated entity_id list.
+
+    Returns (permitted_entities, raw_count) where raw_count is the number of
+    candidate entities before permission filtering. This avoids a second call to
+    expand_service_targets just to populate X-ATM-Entities-Requested.
 
     Raises:
         EntityCreationNotPermitted: if an explicit entity_id is not in the entity registry.
@@ -248,6 +252,8 @@ def resolve_service_targets(
             raise EntityCreationNotPermitted(eid)
         candidates.add(eid)
 
+    raw_count = len(candidates)
+
     # Deduplicate while preserving order, then filter to WRITE-permitted entities
     seen: set[str] = set()
     permitted: list[str] = []
@@ -258,7 +264,7 @@ def resolve_service_targets(
         if resolve(eid, token, hass) == Permission.WRITE:
             permitted.append(eid)
 
-    return permitted
+    return permitted, raw_count
 
 
 def filter_service_response(
@@ -278,10 +284,12 @@ def filter_service_response(
             if perm in (Permission.NO_ACCESS, Permission.DENY, Permission.NOT_FOUND):
                 return "<redacted>"
             return response_data
-        if isinstance(response_data, dict):
-            return {}
-        if isinstance(response_data, list):
-            return []
+        if isinstance(response_data, (dict, list)):
+            _LOGGER.warning(
+                "filter_service_response: depth limit reached, truncating %s to empty",
+                type(response_data).__name__,
+            )
+            return {} if isinstance(response_data, dict) else []
         return response_data
     if isinstance(response_data, str):
         if _ENTITY_ID_RE.match(response_data):

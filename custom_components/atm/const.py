@@ -58,3 +58,9 @@ DUAL_GATE_SERVICES = frozenset({
     "homeassistant/stop",
 })
 
+# assist_satellite feature bit for ANNOUNCE support.
+ANNOUNCE_BIT = 2
+
+# Maximum time range for history and statistics queries.
+MAX_HISTORY_RANGE_DAYS = 7
+

@@ -57,8 +57,11 @@ def require_admin(method):
         request_id = str(uuid.uuid4())
         request["atm_rid"] = request_id
         user = request.get(KEY_HASS_USER)
-        if not request.get(KEY_AUTHENTICATED) or not user or not user.is_admin:
-            _LOGGER.info("Admin %s %s unauthorized rid=%s", request.method, request.path, request_id)
+        if not request.get(KEY_AUTHENTICATED):
+            _LOGGER.info("Admin %s %s unauthenticated rid=%s", request.method, request.path, request_id)
+            return _err("unauthorized", "Authentication required.", 401, request_id)
+        if not user or not user.is_admin:
+            _LOGGER.info("Admin %s %s forbidden rid=%s", request.method, request.path, request_id)
             return _err("forbidden", "Admin access required.", 403, request_id)
         _LOGGER.info("Admin %s %s rid=%s user=%s", request.method, request.path, request_id, user.id)
         return await method(self, request, **kwargs)
@@ -379,7 +382,7 @@ class ATMAdminTokensView(HomeAssistantView):
 
         async with data.store.async_lock:
             if data.store.name_slug_exists(name):
-                return _err("invalid_request", "A token with that name (or equivalent slug) already exists.", 409, rid)
+                return _err("conflict", "A token with that name (or equivalent slug) already exists.", 409, rid)
             record, raw_token = await data.store.async_create_token(
                 name=name,
                 created_by=user.id,
@@ -788,7 +791,16 @@ class ATMAdminEntityTreeView(HomeAssistantView):
                 data.entity_tree_cache = await _build_entity_tree(hass)
                 data.entity_tree_cache_valid = True
 
-        return _ok(data.entity_tree_cache, request_id=rid)
+        import functools
+        json_body = await hass.async_add_executor_job(
+            functools.partial(json.dumps, data.entity_tree_cache, default=str)
+        )
+        return web.Response(
+            status=200,
+            content_type="application/json",
+            text=json_body,
+            headers={"X-ATM-Request-ID": rid},
+        )
 
 
 class ATMAdminTokenStatsView(HomeAssistantView):

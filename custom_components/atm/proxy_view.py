@@ -20,6 +20,7 @@ from .const import (
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
+    MAX_HISTORY_RANGE_DAYS,
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
@@ -37,7 +38,6 @@ from .helpers import (
 from .policy_engine import (
     EntityCreationNotPermitted,
     Permission,
-    expand_service_targets,
     filter_entities_for_token,
     filter_service_response,
     resolve,
@@ -75,29 +75,7 @@ def _json_response(
     )
 
 
-def _count_service_targets(
-    entity_id: Any,
-    device_id: Any,
-    area_id: Any,
-    service_domain: str,
-    hass: Any,
-) -> int:
-    """Count raw target entities before permission filtering.
-
-    Used to populate X-ATM-Entities-Requested so the caller can see how many
-    entities were silently filtered out by ATM permissions.
-    """
-    candidates, explicit_ids = expand_service_targets(
-        entity_id=entity_id,
-        device_id=device_id,
-        area_id=area_id,
-        service_domain=service_domain,
-        hass=hass,
-    )
-    return len(candidates | set(explicit_ids))
-
 _MAX_HISTORY_STATES_PER_ENTITY = 10_000
-_MAX_HISTORY_RANGE_DAYS = 7
 
 
 class ATMRootView(HomeAssistantView):
@@ -261,10 +239,8 @@ class ATMServiceView(HomeAssistantView):
                  outcome="allowed", client_ip=client_ip)
             return _json_response({"success": True}, 200, request_id, rl_result)
 
-        requested_count = _count_service_targets(entity_id, device_id, area_id, domain, hass)
-
         try:
-            permitted_entities = resolve_service_targets(
+            permitted_entities, requested_count = resolve_service_targets(
                 entity_id=entity_id,
                 device_id=device_id,
                 area_id=area_id,
@@ -398,7 +374,7 @@ class ATMHistoryView(HomeAssistantView):
 
         # Clamp the query time range to prevent unbounded DB reads. The cap is applied
         # to the DB query itself, not just the response, to bound recorder thread load.
-        max_start = effective_end - timedelta(days=_MAX_HISTORY_RANGE_DAYS)
+        max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
         if start_time < max_start:
             start_time = max_start
 
@@ -430,8 +406,10 @@ class ATMHistoryView(HomeAssistantView):
         if limit_raw:
             try:
                 limit_int = int(limit_raw)
+                if limit_int <= 0:
+                    return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
             except ValueError:
-                pass
+                return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
 
         output: dict[str, Any] = {}
         effective_limit = limit_int if limit_int is not None else _MAX_HISTORY_STATES_PER_ENTITY
@@ -488,6 +466,11 @@ class ATMStatisticsView(HomeAssistantView):
                 end_time = _parse_time_param(end_time_raw)
             except ValueError:
                 return _error("invalid_request", "Invalid end_time.", 400, request_id)
+
+        effective_end = end_time or _utcnow()
+        max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
+        if start_time < max_start:
+            start_time = max_start
 
         period = request.query.get("period", "hour")
         if period not in ("5minute", "hour", "day", "week", "month"):

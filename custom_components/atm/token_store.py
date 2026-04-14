@@ -221,6 +221,14 @@ class ArchivedTokenRecord:
         )
 
 
+def _clamp_int(value: object, valid: set[int], default: int) -> int:
+    try:
+        converted = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return converted if converted in valid else default
+
+
 @dataclass
 class GlobalSettings:
     """Integration-wide settings persisted to storage."""
@@ -261,8 +269,8 @@ class GlobalSettings:
             log_entity_names=bool(data.get("log_entity_names", True)),
             log_client_ip=bool(data.get("log_client_ip", True)),
             notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
-            audit_flush_interval=int(data.get("audit_flush_interval", 15)),
-            audit_log_maxlen=int(data.get("audit_log_maxlen", 10000)),
+            audit_flush_interval=_clamp_int(data.get("audit_flush_interval"), {0, 5, 10, 15, 30, 60}, 15),
+            audit_log_maxlen=_clamp_int(data.get("audit_log_maxlen"), {100, 1000, 5000, 10000}, 10000),
         )
 
 

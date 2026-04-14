@@ -7,9 +7,11 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import uuid
+from datetime import timedelta
 from typing import Any
 
 from aiohttp import web
@@ -30,11 +32,13 @@ from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
 from .const import (
+    ANNOUNCE_BIT,
     ATM_VERSION,
     BLOCKED_DOMAINS,
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
+    MAX_HISTORY_RANGE_DAYS,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
@@ -700,6 +704,11 @@ async def _tool_get_history(
         except ValueError:
             return _tool_error("Invalid end_time format."), "denied", entity_id
 
+    effective_end = end_time or utcnow()
+    max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
+    if start_time < max_start:
+        start_time = max_start
+
     try:
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder import history as rec_history
@@ -761,6 +770,11 @@ async def _tool_get_statistics(
             end_time = _parse_time_param(end_time_raw)
         except ValueError:
             return _tool_error("Invalid end_time format."), "denied", entity_id
+
+    effective_end = end_time or utcnow()
+    max_start = effective_end - timedelta(days=MAX_HISTORY_RANGE_DAYS)
+    if start_time < max_start:
+        start_time = max_start
 
     period = args.get("period", "hour")
     if period not in ("5minute", "hour", "day", "week", "month"):
@@ -1001,7 +1015,7 @@ async def _tool_edit_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: replace the config of an existing UI automation."""
-    if not token.allow_automation_write and not token.pass_through:
+    if not token.allow_automation_write:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "edit_automation"
 
     automation_id = args.get("automation_id", "").strip()
@@ -1044,14 +1058,13 @@ async def _tool_delete_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: permanently delete a UI automation."""
-    if not token.allow_automation_write and not token.pass_through:
+    if not token.allow_automation_write:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "delete_automation"
 
     automation_id = args.get("automation_id", "").strip()
     if not automation_id:
         return _tool_error("automation_id is required."), "invalid_request", "delete_automation"
 
-    lock = _get_automation_lock(hass)
     path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
     try:
@@ -1112,7 +1125,7 @@ async def _tool_edit_script(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: replace the config of an existing script in scripts.yaml."""
-    if not token.allow_script_write and not token.pass_through:
+    if not token.allow_script_write:
         return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "edit_script"
 
     script_id = args.get("script_id", "").strip()
@@ -1151,7 +1164,7 @@ async def _tool_delete_script(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: permanently delete a script from scripts.yaml."""
-    if not token.allow_script_write and not token.pass_through:
+    if not token.allow_script_write:
         return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "delete_script"
 
     script_id = args.get("script_id", "").strip()
@@ -1229,6 +1242,10 @@ def _yaml_scalar(value: Any) -> str:
     if isinstance(value, int):
         return f"'{value}'"
     if isinstance(value, float):
+        if math.isnan(value):
+            return ".nan"
+        if math.isinf(value):
+            return ".inf" if value > 0 else "-.inf"
         return str(value)
     s = str(value)
     if not s:
@@ -1267,7 +1284,7 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
     for state in accessible:
         friendly_name = state.attributes.get("friendly_name") or state.entity_id
         domain = state.entity_id.split(".")[0]
-        lines.append(f"- names: {friendly_name}")
+        lines.append(f"- names: {_yaml_scalar(friendly_name)}")
         lines.append(f"  domain: {domain}")
         lines.append(f"  state: {_yaml_scalar(state.state)}")
 
@@ -1281,7 +1298,7 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
                 if device and device.area_id:
                     area_id = device.area_id
         if area_id and area_id in area_names:
-            lines.append(f"  areas: {area_names[area_id]}")
+            lines.append(f"  areas: {_yaml_scalar(area_names[area_id])}")
 
         attr_lines: list[str] = []
         for attr_key in _LIVE_CONTEXT_ATTRS:
@@ -1660,13 +1677,12 @@ async def _tool_hass_broadcast(
     if not message:
         return _tool_error("Missing required argument: message"), "invalid_request", "HassBroadcast"
 
-    _ANNOUNCE_BIT = 2
     targets: list[str] = []
     for state in hass.states.async_all():
         if state.entity_id.split(".")[0] != "assist_satellite":
             continue
         features = state.attributes.get("supported_features", 0)
-        if isinstance(features, int) and (features & _ANNOUNCE_BIT):
+        if isinstance(features, int) and (features & ANNOUNCE_BIT):
             if token.pass_through or resolve(state.entity_id, token, hass) == Permission.WRITE:
                 targets.append(state.entity_id)
 
@@ -2149,7 +2165,9 @@ class ATMMcpSseView(HomeAssistantView):
         if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
             _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
                  outcome="rate_limited", client_ip=client_ip)
-            return _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
+            resp = _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
+            resp.headers["Retry-After"] = "60"
+            return resp
 
         data.store.update_last_used(token.id, utcnow())
 

@@ -15,8 +15,7 @@ _FRONTEND_DIR = Path(__file__).parent / "frontend"
 _PANEL_URL = "/local/atm"
 _JS_URL = f"{_PANEL_URL}/atm-panel.js"
 _PANEL_KEY = "atm"
-
-_panel_registered: bool = False
+_PANEL_REGISTERED_KEY = "atm_panel_registered"
 
 
 async def async_register_atm_panel(hass: HomeAssistant) -> None:
@@ -25,8 +24,6 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
     Safe to call on re-setup: removes any stale panel entry before registering.
     Static path registration is skipped silently if already registered.
     """
-    global _panel_registered
-
     try:
         await hass.http.async_register_static_paths([
             StaticPathConfig(
@@ -38,7 +35,7 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
     except RuntimeError:
         pass
 
-    if _panel_registered:
+    if hass.data.get(_PANEL_REGISTERED_KEY):
         async_remove_panel(hass, _PANEL_KEY)
 
     async_register_built_in_panel(
@@ -55,7 +52,7 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
             }
         },
     )
-    _panel_registered = True
+    hass.data[_PANEL_REGISTERED_KEY] = True
 
 
 def remove_atm_panel(hass: HomeAssistant) -> None:
@@ -64,8 +61,5 @@ def remove_atm_panel(hass: HomeAssistant) -> None:
     Silently skips if the panel was never registered (e.g. unload before setup
     completed, or HA restarted with the kill switch enabled).
     """
-    global _panel_registered
-
-    if _panel_registered:
+    if hass.data.pop(_PANEL_REGISTERED_KEY, False):
         async_remove_panel(hass, _PANEL_KEY)
-        _panel_registered = False
