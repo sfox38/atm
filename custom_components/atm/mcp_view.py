@@ -868,6 +868,34 @@ async def _tool_call_service(
     if not isinstance(service_data, dict):
         service_data = {}
 
+    # DUAL_GATE_SERVICES have no entities in hass.states; routing them through
+    # resolve_service_targets always produces an empty list and a spurious 403.
+    # The allow_restart gate above is the only permission check required.
+    if service_key in DUAL_GATE_SERVICES:
+        if domain in HIGH_RISK_DOMAINS:
+            _LOGGER.info(
+                "High-risk service call %s/%s by token %s",
+                domain, service, token.name,
+            )
+        try:
+            async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+                await hass.services.async_call(
+                    domain, service, service_data, blocking=True, return_response=False,
+                )
+        except asyncio.TimeoutError:
+            return (
+                _tool_success(json.dumps({
+                    "success": True,
+                    "partial": True,
+                    "message": "Service dispatched but HA did not respond within the timeout window.",
+                })),
+                "allowed",
+                resource,
+            )
+        except (ServiceNotFound, HomeAssistantError):
+            return _tool_error("Forbidden."), "denied", resource
+        return _tool_success(json.dumps({"success": True})), "allowed", resource
+
     try:
         permitted_entities, _requested_count = resolve_service_targets(
             entity_id=entity_id,

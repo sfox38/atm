@@ -179,8 +179,9 @@ async def get_authenticated_token(
     if token is None:
         return _401
 
-    if token.is_expired():
-        await archive_expired_token(hass, data, token)
+    if not token.is_valid():
+        if token.is_expired():
+            await archive_expired_token(hass, data, token)
         return _401
 
     # Update last_used before the rate limit check so last_access reflects every

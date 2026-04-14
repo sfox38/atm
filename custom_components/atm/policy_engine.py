@@ -57,8 +57,6 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
     entry = registry.async_get(entity_id)
     if entry:
         entity_id = entry.entity_id
-        # Re-fetch entry for canonical ID so device_id lookup is authoritative.
-        entry = registry.async_get(entity_id)
 
     domain = entity_id.split(".")[0]
 
