@@ -109,6 +109,7 @@ class TokenRecord:
     allow_physical_control: bool = False
     allow_service_response: bool = False
     allow_broadcast: bool = False
+    allow_log_read: bool = False
     permissions: PermissionTree = field(default_factory=PermissionTree)
 
     def to_dict(self) -> dict:
@@ -132,6 +133,7 @@ class TokenRecord:
             "allow_physical_control": self.allow_physical_control,
             "allow_service_response": self.allow_service_response,
             "allow_broadcast": self.allow_broadcast,
+            "allow_log_read": self.allow_log_read,
             "permissions": self.permissions.to_dict(),
         }
 
@@ -162,6 +164,7 @@ class TokenRecord:
             allow_physical_control=data.get("allow_physical_control", False),
             allow_service_response=data.get("allow_service_response", False),
             allow_broadcast=data.get("allow_broadcast", False),
+            allow_log_read=data.get("allow_log_read", False),
             updated_at=_parse_dt(data.get("updated_at")),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
         )
@@ -445,6 +448,7 @@ class TokenStore:
             "allow_physical_control",
             "allow_service_response",
             "allow_broadcast",
+            "allow_log_read",
         }
         for key, value in kwargs.items():
             if key in mutable_fields:

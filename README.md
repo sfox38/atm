@@ -131,6 +131,7 @@ ATM is a drop-in replacement for the native HA MCP server. It exposes all 20 nat
 | `get_config` - HA configuration info | `allow_config_read` |
 | `restart_ha` - restart Home Assistant | `allow_restart` |
 | `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
+| `get_logs` - read recent HA system log entries (newest first) | `allow_log_read` |
 | `create_automation` - create a new automation in `automations.yaml` | `allow_automation_write` |
 | `edit_automation` - replace an existing automation's configuration | `allow_automation_write` |
 | `delete_automation` - permanently delete an automation | `allow_automation_write` |
@@ -221,8 +222,9 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 | `allow_template_render` | Rendering Jinja2 templates (permission-scoped environment) | no |
 | `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. | no |
 | `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices. | no |
+| `allow_log_read` | Reading HA system log entries via the `get_logs` MCP tool and `GET /api/atm/logs`. Logs may contain IP addresses and operational details. ATM's own entries are always excluded; token values are scrubbed from messages and tracebacks. | yes |
 
-The four pass-through-exempt flags (`allow_restart`, `allow_physical_control`, `allow_automation_write`, `allow_script_write`) must be explicitly enabled even for pass-through tokens. All other flags are bypassed by pass-through tokens.
+The five pass-through-exempt flags (`allow_restart`, `allow_physical_control`, `allow_automation_write`, `allow_script_write`, `allow_log_read`) must be explicitly enabled even for pass-through tokens. All other flags are bypassed by pass-through tokens.
 
 ### Automation and script write flags
 
@@ -250,8 +252,9 @@ Pass-through does NOT bypass:
 - `allow_physical_control` - a pass-through token cannot call lock, alarm, or cover mutation services without this flag explicitly enabled.
 - `allow_automation_write` - a pass-through token cannot create, edit, or delete automations without this flag explicitly enabled.
 - `allow_script_write` - a pass-through token cannot create, edit, or delete scripts without this flag explicitly enabled.
+- `allow_log_read` - a pass-through token cannot read HA system log entries without this flag explicitly enabled.
 
-These four flags must always be explicitly enabled, regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed by pass-through tokens.
+These five flags must always be explicitly enabled, regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed by pass-through tokens.
 
 The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true` - this is a required acknowledgment field that prevents accidentally enabling pass-through. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
 

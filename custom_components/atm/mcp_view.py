@@ -39,6 +39,7 @@ from .const import (
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
     MAX_HISTORY_RANGE_DAYS,
+    MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
@@ -83,7 +84,7 @@ _MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _AUTOMATION_YAML = "automations.yaml"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write"})
+_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write", "allow_log_read"})
 _SCRIPT_CONFIG_PATH = "scripts.yaml"
 _SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
@@ -339,6 +340,38 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "script_id": {"type": "string", "description": "ID of the script to delete (the slug, e.g. 'morning_routine')."},
             },
             "required": ["script_id"],
+        },
+    },
+    {
+        "name": "get_logs",
+        "description": (
+            "Read recent Home Assistant system log entries. "
+            "Useful for diagnosing errors, failed automations, or integration problems. "
+            "Returns entries at or above the specified level, newest first. "
+            "ATM's own log entries are excluded."
+        ),
+        "flag": "allow_log_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "level": {
+                    "type": "string",
+                    "enum": ["INFO", "WARNING", "ERROR"],
+                    "description": "Minimum log level. INFO returns INFO+WARNING+ERROR; WARNING returns WARNING+ERROR; ERROR returns ERROR only. Defaults to WARNING.",
+                    "default": "WARNING",
+                },
+                "integration": {
+                    "type": "string",
+                    "description": "Optional integration name to filter by (e.g. 'hue', 'mqtt'). Matches homeassistant.components.<name> and custom_components.<name>.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 50,
+                    "description": "Maximum number of entries to return (1-100, default 50).",
+                },
+            },
         },
     },
     {
@@ -914,6 +947,73 @@ async def _tool_get_config(
         if c != DOMAIN and not c.startswith(DOMAIN + ".")
     ]
     return _tool_success(json.dumps(config_dict, default=str)), "allowed", "get_config"
+
+
+_MCP_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
+_MCP_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
+_MCP_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
+
+
+async def _tool_get_logs(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read system_log entries (requires allow_log_read)."""
+    if not token.allow_log_read:
+        return _tool_error("Forbidden. The allow_log_read flag must be enabled on this token."), "denied", "get_logs"
+
+    raw_level = str(args.get("level") or "WARNING").strip().upper()
+    if raw_level not in ("INFO", "WARNING", "ERROR"):
+        raw_level = "WARNING"
+    min_rank = _MCP_LOG_LEVEL_RANK.get(raw_level, _MCP_LOG_LEVEL_RANK["WARNING"])
+
+    integration = str(args.get("integration") or "").strip() or None
+
+    limit = 50
+    raw_limit = args.get("limit")
+    if raw_limit is not None:
+        try:
+            limit = int(raw_limit)
+            if not (1 <= limit <= MAX_LOG_ENTRIES):
+                limit = max(1, min(limit, MAX_LOG_ENTRIES))
+        except (TypeError, ValueError):
+            limit = 50
+
+    syslog = hass.data.get("system_log")
+    if syslog is None:
+        return _tool_success(json.dumps({"count": 0, "entries": []})), "allowed", "get_logs"
+
+    records = getattr(syslog, "records", {})
+    entries: list[dict] = []
+    for record in records.values():
+        record_level = getattr(record, "level", "")
+        if _MCP_LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
+            continue
+        logger_name = getattr(record, "name", "")
+        if any(logger_name.startswith(pfx) for pfx in _MCP_ATM_LOGGER_PREFIXES):
+            continue
+        if integration:
+            if not (
+                logger_name.startswith(f"homeassistant.components.{integration}")
+                or logger_name.startswith(f"custom_components.{integration}")
+            ):
+                continue
+        messages = getattr(record, "message", [])
+        msg = list(messages)[-1] if messages else ""
+        exc_parts = getattr(record, "exception", [])
+        exc_str: str | None = "".join(exc_parts) if exc_parts else None
+        entries.append({
+            "timestamp": getattr(record, "timestamp", 0),
+            "first_occurred": getattr(record, "first_occurred", 0),
+            "level": record_level,
+            "logger": logger_name,
+            "message": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
+            "exception": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
+            "occurrences": getattr(record, "count", 1),
+        })
+
+    entries.sort(key=lambda e: e["timestamp"], reverse=True)
+    entries = entries[:limit]
+    return _tool_success(json.dumps({"count": len(entries), "entries": entries}, default=str)), "allowed", "get_logs"
 
 
 
@@ -1784,6 +1884,8 @@ async def _call_tool(
         return await _tool_hass_stop_moving(arguments, token, hass)
     if tool_name == "HassBroadcast":
         return await _tool_hass_broadcast(arguments, token, hass)
+    if tool_name == "get_logs":
+        return await _tool_get_logs(arguments, token, hass)
     if tool_name == "create_script":
         return await _tool_create_script(arguments, token, hass)
     if tool_name == "edit_script":
@@ -1828,6 +1930,7 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
+            "allow_log_read": token.allow_log_read,
         },
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
@@ -1881,6 +1984,7 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
     lines.append(f"- Physical control (locks/alarms/covers): {'yes' if token.allow_physical_control else 'no'}")
     lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
+    lines.append(f"- Log read: {'yes' if token.allow_log_read else 'no'}")
     lines.append("")
     if token.rate_limit_requests > 0:
         lines.append(
@@ -1939,6 +2043,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
             "allow_broadcast": token.allow_broadcast,
+            "allow_log_read": token.allow_log_read,
         },
         "rate_limit": {
             "requests_per_minute": token.rate_limit_requests,

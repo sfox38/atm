@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -21,6 +22,7 @@ from .const import (
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
     MAX_HISTORY_RANGE_DAYS,
+    MAX_LOG_ENTRIES,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
 )
@@ -747,6 +749,96 @@ class ATMServicesView(HomeAssistantView):
         return _json_response(output, 200, request_id, rl_result)
 
 
+_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
+_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
+_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
+_DEFAULT_LOG_LIMIT = 50
+
+
+def _collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
+    """Read system_log records, filter, scrub, and return newest-first."""
+    min_rank = _LOG_LEVEL_RANK.get(level.upper(), _LOG_LEVEL_RANK["WARNING"])
+    syslog = hass.data.get("system_log")
+    if syslog is None:
+        return []
+    records = getattr(syslog, "records", {})
+    entries: list[dict] = []
+    for record in records.values():
+        record_level = getattr(record, "level", "")
+        if _LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
+            continue
+        logger_name = getattr(record, "name", "")
+        if any(logger_name.startswith(pfx) for pfx in _ATM_LOGGER_PREFIXES):
+            continue
+        if integration:
+            if not (
+                logger_name.startswith(f"homeassistant.components.{integration}")
+                or logger_name.startswith(f"custom_components.{integration}")
+            ):
+                continue
+        messages = getattr(record, "message", [])
+        msg = list(messages)[-1] if messages else ""
+        exc_parts = getattr(record, "exception", [])
+        exc_str: str | None = "".join(exc_parts) if exc_parts else None
+        entries.append({
+            "timestamp": getattr(record, "timestamp", 0),
+            "first_occurred": getattr(record, "first_occurred", 0),
+            "level": record_level,
+            "logger": logger_name,
+            "message": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
+            "exception": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
+            "occurrences": getattr(record, "count", 1),
+        })
+    entries.sort(key=lambda e: e["timestamp"], reverse=True)
+    return entries[:limit]
+
+
+class ATMLogsView(HomeAssistantView):
+    """GET /api/atm/logs - HA system log entries (requires allow_log_read)."""
+
+    url = "/api/atm/logs"
+    name = "api:atm:logs"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        request_id = generate_request_id()
+        resource = "/api/atm/logs"
+        client_ip = _get_client_ip(request)
+
+        result = await _get_authenticated_token(hass, request, data, request_id, resource)
+        if isinstance(result, web.Response):
+            return result
+        token, rl_result = result
+
+        if not token.allow_log_read:
+            _log(data, token, request_id=request_id, method="GET", resource=resource,
+                 outcome="denied", client_ip=client_ip)
+            return _error("forbidden", "Forbidden.", 403, request_id)
+
+        raw_level = request.query.get("level", "WARNING").strip().upper()
+        if raw_level not in ("INFO", "WARNING", "ERROR"):
+            return _error("invalid_request", "level must be INFO, WARNING, or ERROR.", 400, request_id)
+
+        integration = request.query.get("integration", "").strip() or None
+
+        limit = _DEFAULT_LOG_LIMIT
+        raw_limit = request.query.get("limit", "")
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+                if not (1 <= limit <= MAX_LOG_ENTRIES):
+                    return _error("invalid_request", f"limit must be between 1 and {MAX_LOG_ENTRIES}.", 400, request_id)
+            except ValueError:
+                return _error("invalid_request", "limit must be an integer.", 400, request_id)
+
+        entries = _collect_log_entries(hass, raw_level, integration, limit)
+        _log(data, token, request_id=request_id, method="GET", resource=resource,
+             outcome="allowed", client_ip=client_ip)
+        return _json_response({"count": len(entries), "entries": entries}, 200, request_id, rl_result)
+
+
 ALL_VIEWS: list[type[HomeAssistantView]] = [
     ATMRootView,
     ATMStatesView,
@@ -758,4 +850,5 @@ ALL_VIEWS: list[type[HomeAssistantView]] = [
     ATMTemplateView,
     ATMEventsView,
     ATMServicesView,
+    ATMLogsView,
 ]

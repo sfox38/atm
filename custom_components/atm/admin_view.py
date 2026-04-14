@@ -456,7 +456,7 @@ class ATMAdminTokenView(HomeAssistantView):
                 if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
                          "allow_automation_write", "allow_script_write", "allow_config_read",
                          "allow_template_render", "allow_restart", "allow_physical_control",
-                         "allow_service_response", "allow_broadcast")
+                         "allow_service_response", "allow_broadcast", "allow_log_read")
             }
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
@@ -471,7 +471,7 @@ class ATMAdminTokenView(HomeAssistantView):
         _TOOLS_LIST_FLAGS = {
             "pass_through", "allow_automation_write", "allow_script_write",
             "allow_config_read", "allow_template_render", "allow_restart",
-            "allow_physical_control", "allow_broadcast",
+            "allow_physical_control", "allow_broadcast", "allow_log_read",
         }
         if patchable.keys() & _TOOLS_LIST_FLAGS:
             notify_tools_list_changed(token_id, data.sse_connections)
@@ -768,6 +768,7 @@ class ATMAdminScopeView(HomeAssistantView):
                 "allow_restart": token.allow_restart,
                 "allow_physical_control": token.allow_physical_control,
                 "allow_broadcast": token.allow_broadcast,
+                "allow_log_read": token.allow_log_read,
             },
         }, request_id=rid)
 

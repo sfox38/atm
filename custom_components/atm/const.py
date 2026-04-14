@@ -81,3 +81,6 @@ ANNOUNCE_BIT = 2
 # Maximum time range for history and statistics queries.
 MAX_HISTORY_RANGE_DAYS = 7
 
+# Maximum number of log entries returned by the logs endpoint/tool.
+MAX_LOG_ENTRIES = 100
+
