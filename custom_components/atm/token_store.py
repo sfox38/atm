@@ -442,6 +442,7 @@ class TokenStore:
             "allow_config_read",
             "allow_template_render",
             "allow_restart",
+            "allow_physical_control",
             "allow_service_response",
             "allow_broadcast",
         }
