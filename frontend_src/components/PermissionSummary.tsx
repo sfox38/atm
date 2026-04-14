@@ -4,6 +4,7 @@ import type { PermissionTree, NodeState, EntityTree } from "../types";
 interface Props {
   permissions: PermissionTree;
   entityTree?: EntityTree | null;
+  onEntityClick?: (entityId: string) => void;
 }
 
 const STATE_LABEL: Record<NodeState, string> = {
@@ -112,7 +113,7 @@ function SortHeader({
   );
 }
 
-export function PermissionSummary({ permissions, entityTree }: Props) {
+export function PermissionSummary({ permissions, entityTree, onEntityClick }: Props) {
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -192,24 +193,39 @@ export function PermissionSummary({ permissions, entityTree }: Props) {
         </tr>
       </thead>
       <tbody>
-        {sorted.map((item) => (
-          <tr key={`${item.type}:${item.id}`} style={{ borderBottom: "1px solid var(--divider-color, #e0e0e0)" }}>
-            <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
-              <span style={{ ...BADGE_BASE, ...TYPE_BADGE_STYLE[item.type] }}>
-                {TYPE_LABEL[item.type]}
-              </span>
-            </td>
-            <td style={{ padding: "5px 8px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {item.friendlyName !== item.id ? item.friendlyName : <span style={{ color: "var(--secondary-text-color, #9e9e9e)" }}>-</span>}
-            </td>
-            <td style={{ padding: "5px 8px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--secondary-text-color, #9e9e9e)" }}>
-              {item.id}
-            </td>
-            <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
-              <span className={STATE_CLASS[item.state]}>{STATE_LABEL[item.state]}</span>
-            </td>
-          </tr>
-        ))}
+        {sorted.map((item) => {
+          const isClickable = item.type === "entity" && !!onEntityClick;
+          const clickStyle: React.CSSProperties = isClickable
+            ? { cursor: "pointer", textDecoration: "underline dotted" }
+            : {};
+          const handleClick = isClickable ? () => onEntityClick!(item.id) : undefined;
+          return (
+            <tr key={`${item.type}:${item.id}`} style={{ borderBottom: "1px solid var(--divider-color, #e0e0e0)" }}>
+              <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
+                <span style={{ ...BADGE_BASE, ...TYPE_BADGE_STYLE[item.type] }}>
+                  {TYPE_LABEL[item.type]}
+                </span>
+              </td>
+              <td
+                style={{ padding: "5px 8px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...clickStyle }}
+                onClick={handleClick}
+                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+              >
+                {item.friendlyName !== item.id ? item.friendlyName : <span style={{ color: "var(--secondary-text-color, #9e9e9e)" }}>-</span>}
+              </td>
+              <td
+                style={{ padding: "5px 8px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--secondary-text-color, #9e9e9e)", ...clickStyle }}
+                onClick={handleClick}
+                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+              >
+                {item.id}
+              </td>
+              <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
+                <span className={STATE_CLASS[item.state]}>{STATE_LABEL[item.state]}</span>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

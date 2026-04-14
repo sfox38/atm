@@ -672,6 +672,7 @@ function ATMApp({ hass }: { hass: unknown }) {
           <TokenDetailView
             tokenId={view.tokenId}
             onBack={goBack}
+            onRefresh={refreshTokens}
           />
         )}
         {tab === "audit" && <AuditView tokens={tokens} />}

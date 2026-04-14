@@ -22,6 +22,7 @@ export interface TokenRecord {
   expires_at: string | null;
   revoked: boolean;
   last_used_at: string | null;
+  updated_at: string | null;
   pass_through: boolean;
   rate_limit_requests: number;
   rate_limit_burst: number;

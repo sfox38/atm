@@ -97,6 +97,7 @@ class TokenRecord:
     expires_at: datetime | None = None
     revoked: bool = False
     last_used_at: datetime | None = None
+    updated_at: datetime | None = None
     pass_through: bool = False
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
@@ -117,6 +118,7 @@ class TokenRecord:
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "revoked": self.revoked,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "pass_through": self.pass_through,
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
@@ -154,6 +156,7 @@ class TokenRecord:
             allow_restart=data.get("allow_restart", False),
             allow_service_response=data.get("allow_service_response", False),
             allow_broadcast=data.get("allow_broadcast", False),
+            updated_at=_parse_dt(data.get("updated_at")),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
         )
 
@@ -327,16 +330,18 @@ class TokenStore:
         """
         raw_token = TOKEN_PREFIX + secrets.token_hex(TOKEN_HEX_LENGTH // 2)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        now = utcnow()
         record = TokenRecord(
             id=str(uuid.uuid4()),
             name=name,
             token_hash=token_hash,
-            created_at=utcnow(),
+            created_at=now,
             created_by=created_by,
             expires_at=expires_at,
             pass_through=pass_through,
             rate_limit_requests=rate_limit_requests,
             rate_limit_burst=rate_limit_burst if rate_limit_requests > 0 else 0,
+            updated_at=now,
         )
         self._tokens[record.id] = record
         await self.async_save()
@@ -430,6 +435,7 @@ class TokenStore:
                 setattr(token, key, value)
         if token.rate_limit_requests == 0:
             token.rate_limit_burst = 0
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -443,6 +449,7 @@ class TokenStore:
         if token is None:
             return None
         token.permissions = permissions
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -471,6 +478,7 @@ class TokenStore:
             collection.pop(node_id, None)
         else:
             collection[node_id] = PermissionNode(state=state, hint=hint)
+        token.updated_at = utcnow()
         await self.async_save()
         return token
 
@@ -509,6 +517,7 @@ class TokenStore:
             return None
         raw_token = TOKEN_PREFIX + secrets.token_hex(TOKEN_HEX_LENGTH // 2)
         token.token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        token.updated_at = utcnow()
         await self.async_save()
         return token, raw_token
 

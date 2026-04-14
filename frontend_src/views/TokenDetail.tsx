@@ -13,6 +13,7 @@ import { AreaPicker } from "../components/AreaPicker";
 interface Props {
   tokenId: string;
   onBack: () => void;
+  onRefresh?: () => void;
 }
 
 function formatDate(iso: string | null): string {
@@ -82,7 +83,7 @@ function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string;
   );
 }
 
-export function TokenDetailView({ tokenId, onBack }: Props) {
+export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +97,8 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
   const [ptToggling, setPtToggling] = useState(false);
   const [ptConfirmBox, setPtConfirmBox] = useState(false);
   const [ptConfirmed, setPtConfirmed] = useState(false);
+  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const [permissionsVersion, setPermissionsVersion] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,6 +138,7 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
       const { token: rawToken } = resp as { token: string };
       setRotatedRawToken(rawToken);
       setShowRotateConfirm(false);
+      onRefresh?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to rotate token.");
     } finally {
@@ -254,7 +258,11 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
           </div>
           <div className="stat-item">
             <span className="stat-label">Created</span>
-            <span className="stat-value" style={{ fontSize: 13 }}>{formatDate(token.created_at)}</span>
+            <span className="stat-value" style={{ fontSize: 13 }} title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Last Updated</span>
+            <span className="stat-value" style={{ fontSize: 13 }} title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Expires</span>
@@ -321,7 +329,21 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
           {!token.pass_through && (
             <div className="card">
               <div className="card-header">Effective Permission Simulator</div>
-              <PermissionSimulator tokenId={tokenId} />
+              <PermissionSimulator
+                tokenId={tokenId}
+                externalEntityId={selectedEntityId || undefined}
+                triggerVersion={permissionsVersion}
+              />
+            </div>
+          )}
+          {!token.pass_through && (
+            <div className="card">
+              <div className="card-header">Permission Summary</div>
+              <PermissionSummary
+                permissions={token.permissions}
+                entityTree={entityTree}
+                onEntityClick={setSelectedEntityId}
+              />
             </div>
           )}
         </div>
@@ -348,19 +370,16 @@ export function TokenDetailView({ tokenId, onBack }: Props) {
               <EntityTree
                 tokenId={tokenId}
                 permissions={token.permissions}
-                onPermissionsChange={(tree) => setToken({ ...token, permissions: tree })}
+                onPermissionsChange={(tree) => {
+                  setToken({ ...token, permissions: tree });
+                  setPermissionsVersion((v) => v + 1);
+                }}
+                onEntityClick={setSelectedEntityId}
               />
             </div>
           )}
         </div>
       </div>
-
-      {!token.pass_through && (
-        <div className="card">
-          <div className="card-header">Permission Summary</div>
-          <PermissionSummary permissions={token.permissions} entityTree={entityTree} />
-        </div>
-      )}
 
       {showAreaPicker && entityTree && (
         <AreaPicker

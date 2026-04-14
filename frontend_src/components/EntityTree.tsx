@@ -12,6 +12,7 @@ interface Props {
   tokenId: string;
   permissions: PermissionTree;
   onPermissionsChange: (tree: PermissionTree) => void;
+  onEntityClick?: (entityId: string) => void;
 }
 
 function effectivePermission(
@@ -127,11 +128,12 @@ interface EntityRowProps {
   filterText: string;
   isGhost: boolean;
   onPermChange: (tree: PermissionTree) => void;
+  onEntityClick?: (entityId: string) => void;
 }
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, indent, filterText, isGhost, onPermChange,
+  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
@@ -150,6 +152,7 @@ function EntityRow({
         hint: entityNode?.hint ?? null,
       });
       onPermChange(tree);
+      onEntityClick?.(entityId);
     } catch {
       // ignore
     }
@@ -158,7 +161,12 @@ function EntityRow({
   return (
     <div className="tree-node" style={{ paddingLeft: `${indent * 20 + 6}px` }}>
       <span style={{ width: 20, flexShrink: 0 }} />
-      <div className="tree-name">
+      <div
+        className="tree-name"
+        style={{ cursor: onEntityClick ? "pointer" : undefined }}
+        onClick={() => onEntityClick?.(entityId)}
+        title={onEntityClick ? `Simulate permissions for ${entityId}` : undefined}
+      >
         <div className="tree-friendly">{friendlyName ?? entityId}</div>
         <div className="tree-entity-id">{entityId}</div>
       </div>
@@ -166,7 +174,6 @@ function EntityRow({
         <span className="tree-badge tree-badge-ghost" title="This entity no longer exists in Home Assistant.">ghost</span>
       )}
       <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
-      <PermissionSelector value={state} onChange={setEntityState} />
       {state !== "GREY" && (
         <HintInput
           tokenId={tokenId}
@@ -176,6 +183,7 @@ function EntityRow({
           onSaved={onPermChange}
         />
       )}
+      <PermissionSelector value={state} onChange={setEntityState} />
     </div>
   );
 }
@@ -191,11 +199,12 @@ interface DeviceGroupProps {
   filterText: string;
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
+  onEntityClick?: (entityId: string) => void;
 }
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
@@ -234,7 +243,7 @@ function DeviceGroup({
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
           {expanded ? "v" : ">"}
         </button>
-        <div className="tree-name">
+        <div className="tree-name" style={{ cursor: "pointer" }} onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly">{deviceName}</span>
         </div>
         {isDynamic && (
@@ -260,6 +269,7 @@ function DeviceGroup({
                 filterText={filterText}
                 isGhost={!allEntityIds.has(eid)}
                 onPermChange={onPermChange}
+                onEntityClick={onEntityClick}
               />
             );
           })}
@@ -277,10 +287,11 @@ interface DomainGroupProps {
   filterText: string;
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
+  onEntityClick?: (entityId: string) => void;
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -322,7 +333,7 @@ function DomainGroup({
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
           {expanded ? "v" : ">"}
         </button>
-        <div className="tree-name">
+        <div className="tree-name" style={{ cursor: "pointer" }} onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly" style={{ fontWeight: 500 }}>{domainKey}</span>
         </div>
         {isDynamic && (
@@ -349,6 +360,7 @@ function DomainGroup({
               filterText={filterText}
               allEntityIds={allEntityIds}
               onPermChange={onPermChange}
+              onEntityClick={onEntityClick}
             />
           ))}
           {domainData.deviceless_entities.length > 0 && (
@@ -376,6 +388,7 @@ function DomainGroup({
                     filterText={filterText}
                     isGhost={!allEntityIds.has(eid)}
                     onPermChange={onPermChange}
+                    onEntityClick={onEntityClick}
                   />
                 );
               })}
@@ -394,6 +407,7 @@ function DomainGroup({
               filterText={filterText}
               isGhost={true}
               onPermChange={onPermChange}
+              onEntityClick={onEntityClick}
             />
           ))}
         </div>
@@ -402,7 +416,7 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -461,6 +475,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange }: Props)
           filterText={filter}
           allEntityIds={allEntityIds}
           onPermChange={onPermissionsChange}
+          onEntityClick={onEntityClick}
         />
       ))}
     </div>

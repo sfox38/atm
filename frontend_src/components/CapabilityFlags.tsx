@@ -8,7 +8,7 @@ interface Props {
 }
 
 const FLAGS: {
-  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
+  key: keyof Pick<TokenRecord, "allow_restart" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
   label: string;
   description: string;
   alwaysShown?: boolean;
@@ -18,11 +18,6 @@ const FLAGS: {
     label: "Allow HA restart/stop",
     description: "Permits homeassistant.restart and homeassistant.stop service calls. Evaluated even in pass-through mode.",
     alwaysShown: true,
-  },
-  {
-    key: "allow_automation_write",
-    label: "Allow automation write",
-    description: "Permits creating and modifying HA automations.",
   },
   {
     key: "allow_config_read",
