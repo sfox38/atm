@@ -124,6 +124,18 @@ def _write_scripts_yaml(path: str, data: dict) -> None:
     contents = _yaml_dump(data)
     _write_utf8_file_atomic(path, contents)
 
+
+def _yaml_file_has_includes(path: str) -> bool:
+    """Return True if the file exists and contains YAML !include directives."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return "!include" in f.read()
+    except OSError:
+        return False
+
+
+_SCRIPT_ID_RE = re.compile(r"^[a-z0-9_]+$")
+
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
         "name": "get_state",
@@ -892,7 +904,9 @@ async def _tool_call_service(
                 "allowed",
                 resource,
             )
-        except (ServiceNotFound, HomeAssistantError):
+        except ServiceNotFound:
+            return _tool_error("Service not found."), "denied", resource
+        except HomeAssistantError:
             return _tool_error("Forbidden."), "denied", resource
         return _tool_success(json.dumps({"success": True})), "allowed", resource
 
@@ -951,7 +965,9 @@ async def _tool_call_service(
             "allowed",
             resource,
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", resource
+    except HomeAssistantError:
         return _tool_error("Forbidden."), "denied", resource
 
     filtered_response = filter_service_response(svc_response, token, hass) if svc_response is not None else None
@@ -1132,6 +1148,8 @@ async def _tool_create_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "create_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             items.append(config)
             await hass.async_add_executor_job(_write_automations_yaml, path, items)
@@ -1172,6 +1190,8 @@ async def _tool_edit_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "edit_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             idx = next((i for i, a in enumerate(items) if a.get("id") == automation_id), None)
             if idx is None:
@@ -1201,6 +1221,8 @@ async def _tool_delete_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             filtered = [a for a in items if a.get("id") != automation_id]
             if len(filtered) == len(items):
@@ -1224,6 +1246,8 @@ async def _tool_create_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "create_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("script_id must contain only lowercase letters, digits, and underscores."), "invalid_request", "create_script"
 
     config = args.get("config")
     if not isinstance(config, dict):
@@ -1240,6 +1264,8 @@ async def _tool_create_script(
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "create_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id in scripts:
                 return _tool_error(f"A script with id '{script_id}' already exists. Use edit_script to update it."), "invalid_request", "create_script"
@@ -1263,6 +1289,8 @@ async def _tool_edit_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "edit_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("script_id must contain only lowercase letters, digits, and underscores."), "invalid_request", "edit_script"
 
     config = args.get("config")
     if not isinstance(config, dict):
@@ -1279,6 +1307,8 @@ async def _tool_edit_script(
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "edit_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "edit_script"
@@ -1302,11 +1332,15 @@ async def _tool_delete_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "delete_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("Invalid script ID format."), "invalid_request", "delete_script"
 
     path = hass.config.path(_SCRIPT_CONFIG_PATH)
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "delete_script"
@@ -1341,7 +1375,9 @@ async def _tool_restart_ha(
             "allowed",
             "restart_ha",
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", "restart_ha"
+    except HomeAssistantError:
         return _tool_error("Restart failed."), "denied", "restart_ha"
 
     return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
@@ -1536,7 +1572,9 @@ async def _tool_intent_action(
             "allowed",
             tool_name,
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", tool_name
+    except HomeAssistantError:
         return _tool_error("Service call failed."), "denied", tool_name
 
     success: list[dict] = _build_target_context(args or {}, hass)
@@ -1810,7 +1848,9 @@ async def _tool_hass_cancel_all_timers(
                 )
         except asyncio.TimeoutError:
             pass
-        except (ServiceNotFound, HomeAssistantError):
+        except ServiceNotFound:
+            return _tool_error("Service not found."), "denied", "HassCancelAllTimers"
+        except HomeAssistantError:
             return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
     return _tool_success(json.dumps({
         "speech": {},
@@ -1872,7 +1912,9 @@ async def _tool_hass_broadcast(
             "allowed",
             "HassBroadcast",
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", "HassBroadcast"
+    except HomeAssistantError:
         return _tool_error("Broadcast failed. No compatible satellite devices found."), "denied", "HassBroadcast"
 
     return _tool_success(json.dumps({"success": True})), "allowed", "HassBroadcast"
@@ -2325,7 +2367,7 @@ async def _handle_streamable_batch(
     """
     if not items:
         return web.Response(
-            status=400,
+            status=200,
             content_type="application/json",
             text=json.dumps(_jsonrpc_error(None, -32600, "Empty batch.")),
             headers={"X-ATM-Request-ID": request_id},
@@ -2523,28 +2565,43 @@ class ATMMcpSseView(HomeAssistantView):
         if request.content_length is not None and request.content_length > _MAX_BODY:
             return _error("request_too_large", "Request body too large.", 413, request_id)
         try:
-            body_bytes = await request.read()
+            body_bytes = await request.content.read(_MAX_BODY + 1)
         except Exception:
             return _error("invalid_request", "Failed to read request body.", 400, request_id)
         if len(body_bytes) > _MAX_BODY:
             return _error("request_too_large", "Request body too large.", 413, request_id)
         if not body_bytes:
-            return _error("invalid_request", "Empty request body.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32700, "Parse error.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
         try:
             parsed = json.loads(body_bytes)
         except json.JSONDecodeError:
-            return _error("invalid_request", "Invalid JSON body.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32700, "Parse error.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         if isinstance(parsed, list):
             return await _handle_streamable_batch(parsed, token, rl_result, hass, data, request_id, client_ip, base_url=str(request.url.origin()))
 
         if not isinstance(parsed, dict):
-            return _error("invalid_request", "Request body must be a JSON object or array.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32600, "Invalid Request.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         body = parsed
         if body.get("jsonrpc") != "2.0":
             return web.Response(
-                status=400,
+                status=200,
                 content_type="application/json",
                 text=json.dumps(_jsonrpc_error(body.get("id"), -32600, "Invalid Request.")),
                 headers={"X-ATM-Request-ID": request_id},
