@@ -16,18 +16,23 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
   const entityInputRef = useRef(entityInput);
   entityInputRef.current = entityInput;
   const externalUpdateRef = useRef(false);
+  const genRef = useRef(0);
 
   const simulate = useCallback(async (eid: string) => {
     if (!eid.trim()) return;
+    const gen = ++genRef.current;
     setLoading(true);
     setError(null);
     try {
       const data = await api.resolve(tokenId, eid.trim());
+      if (gen !== genRef.current) return;
       setResult(data);
     } catch (e: unknown) {
+      if (gen !== genRef.current) return;
       setError(e instanceof Error ? e.message : "Simulation failed.");
       setResult(null);
     } finally {
+      if (gen !== genRef.current) return;
       setLoading(false);
     }
   }, [tokenId]);
