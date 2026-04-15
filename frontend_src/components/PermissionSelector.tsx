@@ -14,15 +14,36 @@ const BUTTONS: { state: NodeState; label: string; title: string }[] = [
   { state: "RED", label: "D", title: "Deny (overrides all children)" },
 ];
 
+let _dragState: NodeState | null = null;
+
+if (typeof document !== "undefined") {
+  document.addEventListener("pointerup", () => { _dragState = null; });
+  document.addEventListener("pointercancel", () => { _dragState = null; });
+}
+
 export function PermissionSelector({ value, onChange, disabled }: Props) {
   return (
-    <div className="perm-selector" aria-label="Permission">
+    <div
+      className="perm-selector"
+      aria-label="Permission"
+      style={{ touchAction: "none" }}
+      onPointerEnter={() => {
+        if (_dragState !== null && !disabled) onChange(_dragState);
+      }}
+    >
       {BUTTONS.map(({ state, label, title }) => (
         <button
           key={state}
           title={title}
           className={`perm-btn${value === state ? ` active-${state}` : ""}`}
-          onClick={() => !disabled && onChange(state)}
+          onPointerDown={(e) => {
+            if (disabled) return;
+            e.preventDefault();
+            e.currentTarget.releasePointerCapture(e.pointerId);
+            const newState: NodeState = state === value ? "GREY" : state;
+            _dragState = newState;
+            onChange(newState);
+          }}
           disabled={disabled}
           aria-pressed={value === state}
         >

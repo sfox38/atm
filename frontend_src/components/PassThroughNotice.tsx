@@ -31,16 +31,13 @@ export function PassThroughNotice({ token, onUpdate }: Props) {
     <div>
       <div className="pass-through-header-banner">
         <p>
-          <strong style={{ color: "var(--warning-color, #ff9800)" }}>Full Access token.</strong> This token has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, TTL, rate limiting, and audit logging are active.
+          <strong style={{ color: "var(--warning-color, #ff9800)" }}>Full Access token.</strong> This token has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, expiry, rate limiting, and audit logging are active.
         </p>
         <p style={{ marginTop: 8 }}>
-          The <strong>allow restart/stop</strong> dual-gate still applies and is configurable in the left column.
+          Restarting or stopping Home Assistant, controlling locks and alarms, and writing automations and scripts still require their respective flags to be enabled. These are configurable in the left panel.
         </p>
         <p style={{ marginTop: 8 }}>
-          Stdio limitation: this token cannot be used to replace a LLAT in stdio-based MCP server configurations. It works only with HTTP-based MCP clients that present the token as an Authorization: Bearer header.
-        </p>
-        <p style={{ marginTop: 8, fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)" }}>
-          Not compatible with stdio-based MCP server setups.
+          This token works only with HTTP-based MCP clients (such as Claude Code with <code>--transport http</code>). It cannot be used with stdio-based MCP server setups.
         </p>
       </div>
 

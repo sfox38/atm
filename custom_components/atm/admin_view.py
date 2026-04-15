@@ -15,7 +15,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
+from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
@@ -284,7 +284,7 @@ class ATMAdminInfoView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
-        return _ok({"version": ATM_VERSION}, request_id=request["atm_rid"])
+        return _ok({"version": ATM_VERSION, "min_ha_version": MIN_HA_VERSION}, request_id=request["atm_rid"])
 
 
 class ATMAdminArchivedTokensView(HomeAssistantView):
@@ -379,6 +379,8 @@ class ATMAdminTokensView(HomeAssistantView):
 
         if rate_limit_requests < 0 or rate_limit_burst < 0:
             return _err("invalid_request", "rate_limit_requests and rate_limit_burst must be non-negative.", 400, rid)
+        if rate_limit_requests > 100_000 or rate_limit_burst > 100_000:
+            return _err("invalid_request", "rate_limit_requests and rate_limit_burst must not exceed 100000.", 400, rid)
 
         async with data.store.async_lock:
             if data.store.name_slug_exists(name):
@@ -453,11 +455,15 @@ class ATMAdminTokenView(HomeAssistantView):
 
             patchable = {
                 k: v for k, v in body.items()
-                if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
+                if k in ("pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
                          "allow_automation_write", "allow_script_write", "allow_config_read",
                          "allow_template_render", "allow_restart", "allow_physical_control",
                          "allow_service_response", "allow_broadcast", "allow_log_read")
             }
+            if "use_assist_exposure" in patchable:
+                resulting_pass_through = bool(patchable.get("pass_through", token.pass_through))
+                if not resulting_pass_through:
+                    patchable.pop("use_assist_exposure")
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
                     try:
@@ -466,10 +472,12 @@ class ATMAdminTokenView(HomeAssistantView):
                         return _err("invalid_request", f"{rl_field} must be an integer.", 400, rid)
                     if patchable[rl_field] < 0:
                         return _err("invalid_request", f"{rl_field} must be non-negative.", 400, rid)
+                    if patchable[rl_field] > 100_000:
+                        return _err("invalid_request", f"{rl_field} must not exceed 100000.", 400, rid)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
         _TOOLS_LIST_FLAGS = {
-            "pass_through", "allow_automation_write", "allow_script_write",
+            "pass_through", "use_assist_exposure", "allow_automation_write", "allow_script_write",
             "allow_config_read", "allow_template_render", "allow_restart",
             "allow_physical_control", "allow_broadcast", "allow_log_read",
         }
@@ -762,9 +770,10 @@ class ATMAdminScopeView(HomeAssistantView):
             "writable": sorted(writable),
             "capability_flags": {
                 "allow_config_read": token.allow_config_read,
+                "allow_template_render": token.allow_template_render,
                 "allow_automation_write": token.allow_automation_write,
                 "allow_script_write": token.allow_script_write,
-                "allow_template_render": token.allow_template_render,
+                "allow_service_response": token.allow_service_response,
                 "allow_restart": token.allow_restart,
                 "allow_physical_control": token.allow_physical_control,
                 "allow_broadcast": token.allow_broadcast,
@@ -860,7 +869,7 @@ class ATMAdminTokenAuditView(HomeAssistantView):
         try:
             limit = min(int(request.query.get("limit", 100)), 500)
             offset = max(int(request.query.get("offset", 0)), 0)
-        except ValueError:
+        except (TypeError, ValueError):
             return _err("invalid_request", "Invalid pagination parameters.", 400, rid)
 
         outcome_filter = request.query.get("outcome")
@@ -893,7 +902,7 @@ class ATMAdminAuditView(HomeAssistantView):
         try:
             limit = min(int(request.query.get("limit", 100)), 500)
             offset = max(int(request.query.get("offset", 0)), 0)
-        except ValueError:
+        except (TypeError, ValueError):
             return _err("invalid_request", "Invalid pagination parameters.", 400, rid)
 
         token_id_filter = request.query.get("token_id")
@@ -947,7 +956,8 @@ class ATMAdminSettingsView(HomeAssistantView):
         }
         for key in _BOOL_SETTINGS:
             if key in patchable:
-                patchable[key] = bool(patchable[key])
+                if not isinstance(patchable[key], bool):
+                    return _err("invalid_request", f"{key!r} must be a boolean (true or false).", 400, rid)
 
         if "audit_flush_interval" in patchable:
             try:

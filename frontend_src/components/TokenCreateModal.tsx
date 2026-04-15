@@ -229,7 +229,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
         {passThrough ? (
           <div className="amber-block">
             <p>
-              <strong>This token will have unrestricted access to every entity, service, and system operation in Home Assistant.</strong> It is equivalent to a Long-Lived Access Token. Use only for third-party MCP servers whose tool surface cannot be meaningfully scoped. Revocation and TTL still apply. This token cannot be used with stdio-based MCP server setups.
+              <strong>This token will have unrestricted access to every entity, service, and system operation in Home Assistant.</strong> It is equivalent to a Long-Lived Access Token. Use only for tools you fully control. Revocation and expiry still apply. Works only with HTTP-based MCP clients, not stdio-based ones.
             </p>
             <label className="checkbox-row" style={{ marginTop: 10 }}>
               <input

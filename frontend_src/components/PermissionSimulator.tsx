@@ -21,12 +21,12 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
     if (!eid.trim()) return;
     setLoading(true);
     setError(null);
-    setResult(null);
     try {
       const data = await api.resolve(tokenId, eid.trim());
       setResult(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Simulation failed.");
+      setResult(null);
     } finally {
       setLoading(false);
     }
@@ -76,7 +76,7 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
         onChange={(e) => setEntityInput(e.target.value)}
         style={{ width: "100%", boxSizing: "border-box" }}
       />
-      {loading && <div style={{ fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 6 }}>Simulating...</div>}
+      {loading && !result && <div style={{ fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 6 }}>Simulating...</div>}
       {error && <div className="banner banner-error" style={{ marginTop: 6 }}>{error}</div>}
       {result && (
         <div className="sim-path">

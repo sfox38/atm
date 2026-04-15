@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta
 from enum import Enum
@@ -13,8 +14,10 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 
-from .const import BLOCKED_DOMAINS, SENSITIVE_ATTRIBUTES
+from .const import BLOCKED_DOMAINS, DOMAIN, SENSITIVE_ATTRIBUTES
 from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Permission(str, Enum):
@@ -60,12 +63,18 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
 
     domain = entity_id.split(".")[0]
 
-    # Ghost check (before pass-through short-circuit so ghosts are never accessible)
-    if hass.states.get(entity_id) is None and registry.async_get(entity_id) is None:
+    # Ghost check (before pass-through short-circuit so ghosts are never accessible).
+    # entry is already the registry lookup result; no second call needed.
+    if hass.states.get(entity_id) is None and entry is None:
         return Permission.NOT_FOUND
 
     # ATM blocklist - applies even in pass-through mode
     if domain in BLOCKED_DOMAINS:
+        return Permission.NO_ACCESS
+
+    # Block ATM's own internal sensor entities regardless of pass_through or permission grants.
+    # These live under the sensor domain so BLOCKED_DOMAINS does not catch them.
+    if entry is not None and entry.platform == DOMAIN:
         return Permission.NO_ACCESS
 
     # Pass-through bypasses all entity permission resolution
@@ -126,10 +135,15 @@ def filter_entities_for_token(
     Always scrubs sensitive attributes and blocks the ATM domain, even in pass-through mode.
     """
     if token.pass_through:
+        registry = er.async_get(hass)
         return [
             scrub_sensitive_attributes(e)
             for e in entities
             if e.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+            and not (
+                (entry := registry.async_get(e.entity_id)) is not None
+                and entry.platform == DOMAIN
+            )
         ]
     return [
         scrub_sensitive_attributes(e)
@@ -371,13 +385,22 @@ def parse_relative_time(value: str) -> datetime:
         raise ValueError(f"Unrecognized relative time format: {value!r}")
     n = int(match.group(1))
     unit = match.group(2)
+    _MAX_DAYS = 366
     if unit == "h":
+        if n > _MAX_DAYS * 24:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of {_MAX_DAYS} days.")
         delta = timedelta(hours=n)
     elif unit == "d":
+        if n > _MAX_DAYS:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of {_MAX_DAYS} days.")
         delta = timedelta(days=n)
     elif unit == "w":
+        if n > 52:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of 52 weeks.")
         delta = timedelta(weeks=n)
     else:
+        if n > 12:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of 12 months.")
         delta = timedelta(days=30 * n)
     return utcnow() - delta
 
@@ -394,80 +417,51 @@ def resolve_intent_entities(
 ) -> list[str]:
     """Resolve intent-based targeting (area/name/floor/domain/device_class) to entity_id list.
 
-    Silently drops entities the token cannot WRITE. Never acknowledges blocked or
-    inaccessible entities. Returns an empty list when nothing matches.
+    Uses HA's async_match_targets for name/area/floor resolution to match native HA
+    intent scoring behavior. Silently drops entities the token cannot WRITE. Never
+    acknowledges blocked or inaccessible entities. Returns an empty list when nothing matches.
     """
-    er_inst = er.async_get(hass)
-    ar_inst = ar.async_get(hass)
-    dr_inst = dr.async_get(hass)
+    from homeassistant.helpers.intent import (  # noqa: PLC0415
+        MatchTargetsConstraints,
+        async_match_targets,
+    )
 
-    states = list(hass.states.async_all())
+    all_states = list(hass.states.async_all())
 
-    if domains:
-        domain_set = set(domains)
-        states = [s for s in states if s.entity_id.split(".")[0] in domain_set]
+    if token.pass_through and token.use_assist_exposure:
+        from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+            async_should_expose as _should_expose,
+        )
+        all_states = [s for s in all_states if _should_expose(hass, "conversation", s.entity_id)]
 
-    if device_classes:
-        dc_set = set(device_classes)
-        states = [s for s in states if s.attributes.get("device_class") in dc_set]
+    permitted: list[State] = [
+        s for s in all_states
+        if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+        and (token.pass_through or resolve(s.entity_id, token, hass) == Permission.WRITE)
+    ]
 
-    if floor:
-        floor_lower = floor.lower()
-        floor_area_ids: set[str] = set()
-        for a in ar_inst.async_list_areas():
-            fid = getattr(a, "floor_id", None)
-            if fid and fid.lower() == floor_lower:
-                floor_area_ids.add(a.id)
-        if not floor_area_ids:
-            return []
-        floor_entity_ids: set[str] = set()
-        for entry in er_inst.entities.values():
-            if entry.disabled_by:
-                continue
-            if entry.area_id in floor_area_ids:
-                floor_entity_ids.add(entry.entity_id)
-            elif entry.device_id:
-                device = dr_inst.async_get(entry.device_id)
-                if device and device.area_id in floor_area_ids:
-                    floor_entity_ids.add(entry.entity_id)
-        states = [s for s in states if s.entity_id in floor_entity_ids]
+    if not name and not area and not floor:
+        if domains:
+            domain_set = set(domains)
+            permitted = [s for s in permitted if s.entity_id.split(".")[0] in domain_set]
+        if device_classes:
+            dc_set = set(device_classes)
+            permitted = [s for s in permitted if s.attributes.get("device_class") in dc_set]
+        return [s.entity_id for s in permitted]
 
-    if area:
-        area_lower = area.lower()
-        target_area = None
-        for a in ar_inst.async_list_areas():
-            if a.id == area or a.name.lower() == area_lower:
-                target_area = a
-                break
-        if target_area is None:
-            return []
-        area_entity_ids: set[str] = set()
-        for entry in er_inst.entities.values():
-            if entry.disabled_by:
-                continue
-            if entry.area_id == target_area.id:
-                area_entity_ids.add(entry.entity_id)
-            elif entry.device_id:
-                device = dr_inst.async_get(entry.device_id)
-                if device and device.area_id == target_area.id:
-                    area_entity_ids.add(entry.entity_id)
-        states = [s for s in states if s.entity_id in area_entity_ids]
-
-    if name:
-        name_lower = name.lower()
-        states = [
-            s for s in states
-            if name_lower in s.attributes.get("friendly_name", "").lower()
-        ]
-
-    result: list[str] = []
-    for s in states:
-        eid = s.entity_id
-        if eid.split(".")[0] in BLOCKED_DOMAINS:
-            continue
-        if token.pass_through:
-            result.append(eid)
-        elif resolve(eid, token, hass) == Permission.WRITE:
-            result.append(eid)
-
-    return result
+    constraints = MatchTargetsConstraints(
+        name=name,
+        area_name=area,
+        floor_name=floor,
+        domains=domains,
+        device_classes=device_classes,
+        assistant=None,
+    )
+    result = async_match_targets(
+        hass,
+        constraints,
+        states=permitted,
+    )
+    if not result.is_match:
+        return []
+    return [s.entity_id for s in result.states]

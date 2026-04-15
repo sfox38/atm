@@ -124,6 +124,18 @@ def _write_scripts_yaml(path: str, data: dict) -> None:
     contents = _yaml_dump(data)
     _write_utf8_file_atomic(path, contents)
 
+
+def _yaml_file_has_includes(path: str) -> bool:
+    """Return True if the file exists and contains YAML !include directives."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return "!include" in f.read()
+    except OSError:
+        return False
+
+
+_SCRIPT_ID_RE = re.compile(r"^[a-z0-9_]+$")
+
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
         "name": "get_state",
@@ -892,7 +904,9 @@ async def _tool_call_service(
                 "allowed",
                 resource,
             )
-        except (ServiceNotFound, HomeAssistantError):
+        except ServiceNotFound:
+            return _tool_error("Service not found."), "denied", resource
+        except HomeAssistantError:
             return _tool_error("Forbidden."), "denied", resource
         return _tool_success(json.dumps({"success": True})), "allowed", resource
 
@@ -951,7 +965,9 @@ async def _tool_call_service(
             "allowed",
             resource,
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", resource
+    except HomeAssistantError:
         return _tool_error("Forbidden."), "denied", resource
 
     filtered_response = filter_service_response(svc_response, token, hass) if svc_response is not None else None
@@ -1132,6 +1148,8 @@ async def _tool_create_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "create_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             items.append(config)
             await hass.async_add_executor_job(_write_automations_yaml, path, items)
@@ -1172,6 +1190,8 @@ async def _tool_edit_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "edit_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             idx = next((i for i, a in enumerate(items) if a.get("id") == automation_id), None)
             if idx is None:
@@ -1201,6 +1221,8 @@ async def _tool_delete_automation(
     lock = _get_automation_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
             filtered = [a for a in items if a.get("id") != automation_id]
             if len(filtered) == len(items):
@@ -1224,6 +1246,8 @@ async def _tool_create_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "create_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("script_id must contain only lowercase letters, digits, and underscores."), "invalid_request", "create_script"
 
     config = args.get("config")
     if not isinstance(config, dict):
@@ -1240,6 +1264,8 @@ async def _tool_create_script(
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "create_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id in scripts:
                 return _tool_error(f"A script with id '{script_id}' already exists. Use edit_script to update it."), "invalid_request", "create_script"
@@ -1263,6 +1289,8 @@ async def _tool_edit_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "edit_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("script_id must contain only lowercase letters, digits, and underscores."), "invalid_request", "edit_script"
 
     config = args.get("config")
     if not isinstance(config, dict):
@@ -1279,6 +1307,8 @@ async def _tool_edit_script(
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "edit_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "edit_script"
@@ -1302,11 +1332,15 @@ async def _tool_delete_script(
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "delete_script"
+    if not _SCRIPT_ID_RE.match(script_id):
+        return _tool_error("Invalid script ID format."), "invalid_request", "delete_script"
 
     path = hass.config.path(_SCRIPT_CONFIG_PATH)
     lock = _get_script_lock(hass)
     try:
         async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scripts.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_script"
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "delete_script"
@@ -1341,7 +1375,9 @@ async def _tool_restart_ha(
             "allowed",
             "restart_ha",
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", "restart_ha"
+    except HomeAssistantError:
         return _tool_error("Restart failed."), "denied", "restart_ha"
 
     return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
@@ -1389,6 +1425,11 @@ def _yaml_scalar(value: Any) -> str:
         return f"'{s}'"
     except ValueError:
         pass
+    try:
+        float(s)
+        return f"'{s}'"
+    except ValueError:
+        pass
     if _DATE_PREFIX_RE.match(s):
         return f"'{s}'"
     return s
@@ -1403,14 +1444,24 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
 
     states = hass.states.async_all()
     if token.pass_through:
-        accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            accessible = [
+                s for s in states
+                if _should_expose(hass, "conversation", s.entity_id)
+                and s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+            ]
+        else:
+            accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
     else:
         accessible = [
             s for s in states
             if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
         ]
 
-    accessible.sort(key=lambda s: (s.attributes.get("friendly_name") or s.entity_id).lower())
+    accessible.sort(key=lambda s: s.attributes.get("friendly_name") or s.entity_id)
 
     lines = ["Live Context: An overview of the areas and the devices in this smart home:"]
     for state in accessible:
@@ -1521,7 +1572,9 @@ async def _tool_intent_action(
             "allowed",
             tool_name,
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", tool_name
+    except HomeAssistantError:
         return _tool_error("Service call failed."), "denied", tool_name
 
     success: list[dict] = _build_target_context(args or {}, hass)
@@ -1681,6 +1734,7 @@ async def _tool_hass_media_pause(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaPause", "media_player", "media_pause", {}, entities, hass, args=args)
 
 
@@ -1695,6 +1749,7 @@ async def _tool_hass_media_unpause(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "paused"]
     return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, args=args)
 
 
@@ -1709,6 +1764,7 @@ async def _tool_hass_media_next(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaNext", "media_player", "media_next_track", {}, entities, hass, args=args)
 
 
@@ -1723,6 +1779,7 @@ async def _tool_hass_media_previous(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
 
 
@@ -1781,7 +1838,26 @@ async def _tool_hass_cancel_all_timers(
         domains=["timer"],
         area=args.get("area"),
     )
-    return await _tool_intent_action("HassCancelAllTimers", "timer", "cancel", {}, entities, hass, args=args)
+    canceled = len(entities)
+    if entities:
+        try:
+            async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+                await hass.services.async_call(
+                    "timer", "cancel", {"entity_id": entities},
+                    blocking=True, return_response=False,
+                )
+        except asyncio.TimeoutError:
+            pass
+        except ServiceNotFound:
+            return _tool_error("Service not found."), "denied", "HassCancelAllTimers"
+        except HomeAssistantError:
+            return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
+    return _tool_success(json.dumps({
+        "speech": {},
+        "response_type": "action_done",
+        "data": {"success": [], "failed": []},
+        "speech_slots": {"canceled": canceled},
+    })), "allowed", "HassCancelAllTimers"
 
 
 async def _tool_hass_stop_moving(
@@ -1836,7 +1912,9 @@ async def _tool_hass_broadcast(
             "allowed",
             "HassBroadcast",
         )
-    except (ServiceNotFound, HomeAssistantError):
+    except ServiceNotFound:
+        return _tool_error("Service not found."), "denied", "HassBroadcast"
+    except HomeAssistantError:
         return _tool_error("Broadcast failed. No compatible satellite devices found."), "denied", "HassBroadcast"
 
     return _tool_success(json.dumps({"success": True})), "allowed", "HassBroadcast"
@@ -1934,6 +2012,20 @@ def _resolve_area_id(entry: Any, device_registry: Any) -> str | None:
         if device and device.area_id:
             return device.area_id
     return None
+
+
+async def _get_ha_assist_api(hass: Any) -> Any:
+    """Return HA's Assist LLM APIInstance, or raise if unavailable."""
+    from homeassistant.helpers import llm as _ha_llm
+    llm_context = _ha_llm.LLMContext(
+        platform=DOMAIN,
+        context=None,
+        user_prompt=None,
+        language="en",
+        assistant="conversation",
+        device_id=None,
+    )
+    return await _ha_llm.async_get_api(hass, _ha_llm.LLM_API_ASSIST, llm_context)
 
 
 def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
@@ -2105,6 +2197,7 @@ async def _dispatch_mcp(
             "capabilities": {
                 "tools": {"listChanged": True},
                 "resources": {"subscribe": False},
+                "prompts": {},
             },
             "serverInfo": {"name": "ATM", "version": ATM_VERSION},
         })
@@ -2148,11 +2241,19 @@ async def _dispatch_mcp(
 
     if method == "resources/list":
         resp = _jsonrpc_result(msg_id, {
-            "resources": [{
-                "uri": "atm://server-info",
-                "name": "ATM Server Info",
-                "mimeType": "application/json",
-            }]
+            "resources": [
+                {
+                    "uri": "homeassistant://assist/context-snapshot",
+                    "name": "Assist Context Snapshot",
+                    "description": "A snapshot of the current Assist context, matching the existing GetLiveContext tool output",
+                    "mimeType": "text/plain",
+                },
+                {
+                    "uri": "atm://server-info",
+                    "name": "ATM Server Info",
+                    "mimeType": "application/json",
+                },
+            ]
         })
         _log(data, token, request_id=request_id, method="resources/list",
              resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
@@ -2160,6 +2261,18 @@ async def _dispatch_mcp(
 
     if method == "resources/read":
         uri = params.get("uri", "")
+        if uri == "homeassistant://assist/context-snapshot":
+            context_text = _build_live_context(token, hass)
+            resp = _jsonrpc_result(msg_id, {
+                "contents": [{
+                    "uri": "homeassistant://assist/context-snapshot",
+                    "mimeType": "text/plain",
+                    "text": context_text,
+                }]
+            })
+            _log(data, token, request_id=request_id, method="resources/read",
+                 resource="homeassistant://assist/context-snapshot", outcome="allowed", client_ip=client_ip)
+            return resp, "resources/read", "homeassistant://assist/context-snapshot", "allowed"
         if uri != "atm://server-info":
             if msg_id is not None:
                 _log(data, token, request_id=request_id, method="resources/read",
@@ -2177,6 +2290,56 @@ async def _dispatch_mcp(
         _log(data, token, request_id=request_id, method="resources/read",
              resource="atm://server-info", outcome="allowed", client_ip=client_ip)
         return resp, "resources/read", "atm://server-info", "allowed"
+
+    if method == "prompts/list":
+        if token.pass_through:
+            try:
+                api_inst = await _get_ha_assist_api(hass)
+                prompt_name = f"Default prompt for Home Assistant {api_inst.api.name}"
+                prompts = [{"name": prompt_name, "description": f"Default prompt for Home Assistant {api_inst.api.name} API"}]
+            except Exception:
+                prompts = []
+        else:
+            prompts = [{
+                "name": "ATM access context",
+                "description": "Describes the Home Assistant entities and capabilities accessible to this token",
+            }]
+        resp = _jsonrpc_result(msg_id, {"prompts": prompts})
+        _log(data, token, request_id=request_id, method="prompts/list",
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
+        return resp, "prompts/list", "/api/atm/mcp", "allowed"
+
+    if method == "prompts/get":
+        name = params.get("name", "")
+        if token.pass_through:
+            try:
+                api_inst = await _get_ha_assist_api(hass)
+                expected_name = f"Default prompt for Home Assistant {api_inst.api.name}"
+                if name != expected_name:
+                    _log(data, token, request_id=request_id, method="prompts/get",
+                         resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                    return _jsonrpc_error(msg_id, -32602, "Unknown prompt."), "prompts/get", "/api/atm/mcp", "denied"
+                resp = _jsonrpc_result(msg_id, {
+                    "description": f"Default prompt for Home Assistant {api_inst.api.name} API",
+                    "messages": [{"role": "assistant", "content": {"type": "text", "text": api_inst.api_prompt}}],
+                })
+            except Exception:
+                _log(data, token, request_id=request_id, method="prompts/get",
+                     resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                return _jsonrpc_error(msg_id, -32603, "Prompt unavailable."), "prompts/get", "/api/atm/mcp", "denied"
+        else:
+            if name != "ATM access context":
+                _log(data, token, request_id=request_id, method="prompts/get",
+                     resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                return _jsonrpc_error(msg_id, -32602, "Unknown prompt."), "prompts/get", "/api/atm/mcp", "denied"
+            prompt_text = _build_context_plain(token, hass)
+            resp = _jsonrpc_result(msg_id, {
+                "description": "Describes the Home Assistant entities and capabilities accessible to this token",
+                "messages": [{"role": "assistant", "content": {"type": "text", "text": prompt_text}}],
+            })
+        _log(data, token, request_id=request_id, method="prompts/get",
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
+        return resp, "prompts/get", "/api/atm/mcp", "allowed"
 
     if msg_id is not None:
         _log(data, token, request_id=request_id, method=method or "unknown",
@@ -2204,7 +2367,7 @@ async def _handle_streamable_batch(
     """
     if not items:
         return web.Response(
-            status=400,
+            status=200,
             content_type="application/json",
             text=json.dumps(_jsonrpc_error(None, -32600, "Empty batch.")),
             headers={"X-ATM-Request-ID": request_id},
@@ -2402,28 +2565,43 @@ class ATMMcpSseView(HomeAssistantView):
         if request.content_length is not None and request.content_length > _MAX_BODY:
             return _error("request_too_large", "Request body too large.", 413, request_id)
         try:
-            body_bytes = await request.read()
+            body_bytes = await request.content.read(_MAX_BODY + 1)
         except Exception:
             return _error("invalid_request", "Failed to read request body.", 400, request_id)
         if len(body_bytes) > _MAX_BODY:
             return _error("request_too_large", "Request body too large.", 413, request_id)
         if not body_bytes:
-            return _error("invalid_request", "Empty request body.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32700, "Parse error.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
         try:
             parsed = json.loads(body_bytes)
         except json.JSONDecodeError:
-            return _error("invalid_request", "Invalid JSON body.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32700, "Parse error.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         if isinstance(parsed, list):
             return await _handle_streamable_batch(parsed, token, rl_result, hass, data, request_id, client_ip, base_url=str(request.url.origin()))
 
         if not isinstance(parsed, dict):
-            return _error("invalid_request", "Request body must be a JSON object or array.", 400, request_id)
+            return web.Response(
+                status=200,
+                content_type="application/json",
+                text=json.dumps(_jsonrpc_error(None, -32600, "Invalid Request.")),
+                headers={"X-ATM-Request-ID": request_id},
+            )
 
         body = parsed
         if body.get("jsonrpc") != "2.0":
             return web.Response(
-                status=400,
+                status=200,
                 content_type="application/json",
                 text=json.dumps(_jsonrpc_error(body.get("id"), -32600, "Invalid Request.")),
                 headers={"X-ATM-Request-ID": request_id},

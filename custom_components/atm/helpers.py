@@ -109,7 +109,7 @@ async def read_json_body(request: web.Request, request_id: str) -> dict | web.Re
         return build_error_response("request_too_large", "Request body too large.", 413, request_id)
 
     try:
-        body_bytes = await request.read()
+        body_bytes = await request.content.read(MAX_REQUEST_BODY_BYTES + 1)
     except Exception:
         return build_error_response("invalid_request", "Failed to read request body.", 400, request_id)
 

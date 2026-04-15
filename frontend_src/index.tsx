@@ -255,13 +255,14 @@ const PANEL_CSS = `
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 10px 0;
     border-bottom: 1px solid var(--divider-color, #e0e0e0);
   }
   .toggle-row:last-child { border-bottom: none; }
-  .toggle-label { display: flex; flex-direction: column; gap: 2px; }
+  .toggle-label { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
   .toggle-label span { font-size: 14px; }
-  .toggle-label small { font-size: 12px; color: var(--secondary-text-color, #727272); }
+  .toggle-label small { font-size: 12px; color: var(--secondary-text-color, #727272); word-wrap: break-word; }
 
   /* Modal overlay */
   .modal-backdrop {
@@ -340,14 +341,64 @@ const PANEL_CSS = `
     color: var(--error-color, #f44336);
   }
 
+  /* Audit table timestamp: short form hidden on desktop, shown on mobile */
+  .audit-time-short { display: none; }
+  .audit-time-full { display: inline; }
+
   /* Two-column layout */
   .two-col {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
   }
   @media (max-width: 900px) {
-    .two-col { grid-template-columns: 1fr; }
+    .two-col { grid-template-columns: minmax(0, 1fr); }
+    .two-col > *:first-child { order: 2; }
+    .two-col > *:last-child { order: 1; }
+  }
+  @media (max-width: 600px) {
+    .atm-content { padding: 8px; }
+    .card { padding: 12px; overflow-x: hidden; }
+    .atm-tab { padding: 12px 10px; font-size: 12px; }
+    .tree-badge { display: none; }
+    .tree-effective { display: none; }
+    .tree-hint-link { display: none; }
+    .tree-children { padding-left: 12px; }
+    .tree-node { gap: 6px; }
+
+    /* Token list: keep table layout, hide excess columns */
+    /* Columns: Name(1) Mode(2) Status(3) Created(4) LastUpdated(5) Expires(6) LastUsed(7) RateLimit(8) Actions(9) */
+    /* Keep: Name Mode Status LastUsed */
+    .token-table th:nth-child(4), .token-table th:nth-child(5), .token-table th:nth-child(6),
+    .token-table th:nth-child(8), .token-table th:nth-child(9),
+    .token-table td:nth-child(4), .token-table td:nth-child(5), .token-table td:nth-child(6),
+    .token-table td:nth-child(8), .token-table td:nth-child(9) { display: none; }
+    .token-table th, .token-table td { padding: 6px 4px; }
+    .token-table td:nth-child(1) { word-break: break-all; }
+    .token-table td:nth-child(7) { font-size: 12px; color: var(--secondary-text-color, #9e9e9e); }
+
+    /* Archived tokens: keep table layout, hide excess columns */
+    /* Columns: Name(1) Mode(2) Status(3) Created(4) ArchivedOn(5) LastUsed(6) Actions(7) */
+    /* Keep: Name Mode Status LastUsed */
+    .archived-table th:nth-child(4), .archived-table th:nth-child(5), .archived-table th:nth-child(7),
+    .archived-table td:nth-child(4), .archived-table td:nth-child(5), .archived-table td:nth-child(7) { display: none; }
+    .archived-table th, .archived-table td { padding: 6px 4px; }
+    .archived-table td:nth-child(1) { word-break: break-all; }
+
+    /* Audit table: keep table layout, show Time/Token/Outcome only (tap row for full details) */
+    /* Columns: RequestID(1) Time(2) Token(3) Method(4) Resource(5) Outcome(6) IP(7) */
+    .audit-table tbody tr { cursor: pointer; }
+    .audit-table { table-layout: fixed; }
+    .audit-table th:nth-child(1), .audit-table th:nth-child(4),
+    .audit-table th:nth-child(5), .audit-table th:nth-child(7),
+    .audit-table td:nth-child(1), .audit-table td:nth-child(4),
+    .audit-table td:nth-child(5), .audit-table td:nth-child(7) { display: none; }
+    .audit-table th, .audit-table td { padding: 6px 4px; }
+    .audit-table th:nth-child(2), .audit-table td:nth-child(2) { width: 28%; }
+    .audit-table th:nth-child(6), .audit-table td:nth-child(6) { width: 22%; }
+    .audit-table td:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .audit-time-full { display: none; }
+    .audit-time-short { display: inline; white-space: nowrap; }
   }
 
   /* Permission state colors */
@@ -367,6 +418,7 @@ const PANEL_CSS = `
   .perm-btn {
     padding: 3px 7px;
     border: none;
+    touch-action: none;
     border-right: 1px solid var(--divider-color, #e0e0e0);
     background: none;
     cursor: pointer;

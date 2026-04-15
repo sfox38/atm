@@ -62,7 +62,8 @@ class RateLimiter:
         if rate_limit_requests == 0:
             return RateLimitResult(allowed=True, rate_limiting_enabled=False)
 
-        now = time.time()
+        now = time.monotonic()
+        wall_now = time.time()
         window_cutoff = now - WINDOW_SECONDS
         burst_cutoff = now - BURST_WINDOW_SECONDS
 
@@ -83,17 +84,22 @@ class RateLimiter:
                 rate_limiting_enabled=True,
                 limit=rate_limit_requests,
                 remaining=0,
-                reset=int(oldest + WINDOW_SECONDS),
+                reset=int(wall_now + (oldest + WINDOW_SECONDS - now)),
                 retry_after=max(1, retry_after),
             )
 
-        # Step 3: burst check
+        # Step 3: burst check - scan from the right since the deque is time-ordered.
+        # Break early once we pass the burst window boundary, then index the oldest entry.
         if rate_limit_burst > 0:
-            last_second_count = sum(1 for t in window if t > burst_cutoff)
+            last_second_count = 0
+            for t in reversed(window):
+                if t <= burst_cutoff:
+                    break
+                last_second_count += 1
             if last_second_count >= rate_limit_burst:
-                oldest_in_burst = next(t for t in window if t > burst_cutoff)
+                oldest_in_burst = window[len(window) - last_second_count]
                 retry_after = math.ceil(oldest_in_burst + BURST_WINDOW_SECONDS - now)
-                reset = int(window[0] + WINDOW_SECONDS) if window else int(now + WINDOW_SECONDS)
+                reset = int(wall_now + (window[0] + WINDOW_SECONDS - now)) if window else int(wall_now + WINDOW_SECONDS)
                 return RateLimitResult(
                     allowed=False,
                     rate_limiting_enabled=True,
@@ -105,7 +111,7 @@ class RateLimiter:
 
         # Step 4: record and return
         window.append(now)
-        reset = int(window[0] + WINDOW_SECONDS)
+        reset = int(wall_now + (window[0] + WINDOW_SECONDS - now))
         return RateLimitResult(
             allowed=True,
             rate_limiting_enabled=True,

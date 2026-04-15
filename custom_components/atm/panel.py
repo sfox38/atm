@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from homeassistant.components.frontend import (
@@ -11,9 +12,11 @@ from homeassistant.components.frontend import (
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
+_LOGGER = logging.getLogger(__name__)
+
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
 _PANEL_URL = "/local/atm"
-_JS_URL = f"{_PANEL_URL}/atm-panel.js?v=3"
+_JS_URL = f"{_PANEL_URL}/atm-panel.js"
 _PANEL_KEY = "atm"
 _PANEL_REGISTERED_KEY = "atm_panel_registered"
 
@@ -32,8 +35,8 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
                 cache_headers=False,
             )
         ])
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        _LOGGER.warning("ATM: failed to register static path %s: %s", _PANEL_URL, exc)
 
     if hass.data.get(_PANEL_REGISTERED_KEY):
         async_remove_panel(hass, _PANEL_KEY)

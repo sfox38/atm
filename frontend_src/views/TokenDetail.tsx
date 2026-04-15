@@ -93,6 +93,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
   const [rotatedRawToken, setRotatedRawToken] = useState<string | null>(null);
   const [showAreaPicker, setShowAreaPicker] = useState(false);
+  const [showClearPerms, setShowClearPerms] = useState(false);
+  const [clearingPerms, setClearingPerms] = useState(false);
   const [entityTree, setEntityTree] = useState<import("../types").EntityTree | null>(null);
   const [ptToggling, setPtToggling] = useState(false);
   const [ptConfirmBox, setPtConfirmBox] = useState(false);
@@ -146,6 +148,20 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
     }
   }
 
+  async function clearPermissions() {
+    setClearingPerms(true);
+    try {
+      const updatedTree = await api.setPermissions(tokenId, { domains: {}, devices: {}, entities: {} });
+      setToken((t) => t ? { ...t, permissions: updatedTree } : t);
+      setPermissionsVersion((v) => v + 1);
+      setShowClearPerms(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to clear permissions.");
+    } finally {
+      setClearingPerms(false);
+    }
+  }
+
   async function enablePassThrough() {
     if (!ptConfirmed) return;
     setPtToggling(true);
@@ -186,7 +202,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       {token.pass_through && (
         <div className="pass-through-header-banner">
           <p>
-            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Full Access token.</strong> It has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, TTL, rate limiting, and audit logging are active.
+            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Full Access token.</strong> It has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, expiry, rate limiting, and audit logging are active.
           </p>
         </div>
       )}
@@ -358,14 +374,20 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <div className="card">
               <div className="card-header">
                 <span>Entity Permissions</span>
-                {entityTree && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  {entityTree && (
+                    <button className="btn btn-text btn-sm" onClick={() => setShowAreaPicker(true)}>
+                      Select by Area
+                    </button>
+                  )}
                   <button
                     className="btn btn-text btn-sm"
-                    onClick={() => setShowAreaPicker(true)}
+                    style={{ color: "var(--error-color, #f44336)" }}
+                    onClick={() => setShowClearPerms(true)}
                   >
-                    Select by Area
+                    Clear All
                   </button>
-                )}
+                </div>
               </div>
               <EntityTree
                 tokenId={tokenId}
@@ -391,6 +413,29 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
           }}
           onClose={() => setShowAreaPicker(false)}
         />
+      )}
+
+      {showClearPerms && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3 className="modal-title">Clear all permissions?</h3>
+            <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+              This will reset every domain, device, and entity permission to [N] (no explicit grant). The token will have no access to any entities until new permissions are assigned.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-danger"
+                onClick={clearPermissions}
+                disabled={clearingPerms}
+              >
+                {clearingPerms ? "Clearing..." : "Clear All"}
+              </button>
+              <button className="btn btn-text" onClick={() => setShowClearPerms(false)} disabled={clearingPerms}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

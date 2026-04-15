@@ -183,7 +183,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
   }
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: '"Roboto Mono", monospace' }}>
+    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 12, fontFamily: '"Roboto Mono", monospace' }}>
       <thead>
         <tr>
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
