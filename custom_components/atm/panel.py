@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
 _PANEL_URL = "/local/atm"
-_JS_URL = f"{_PANEL_URL}/atm-panel.js?v=3"
+_JS_URL = f"{_PANEL_URL}/atm-panel.js"
 _PANEL_KEY = "atm"
 _PANEL_REGISTERED_KEY = "atm_panel_registered"
 
