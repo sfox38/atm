@@ -26,6 +26,7 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
       setResult(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Simulation failed.");
+      setResult(null);
     } finally {
       setLoading(false);
     }

@@ -64,6 +64,7 @@ DUAL_GATE_SERVICES = frozenset({
 PHYSICAL_GATE_SERVICES = frozenset({
     "lock/lock",
     "lock/unlock",
+    "lock/open",
     "alarm_control_panel/alarm_disarm",
     "alarm_control_panel/alarm_arm_away",
     "alarm_control_panel/alarm_arm_home",
@@ -71,6 +72,7 @@ PHYSICAL_GATE_SERVICES = frozenset({
     "alarm_control_panel/alarm_arm_vacation",
     "alarm_control_panel/alarm_trigger",
     "cover/open_cover",
+    "cover/close_cover",
     "cover/stop_cover",
     "cover/set_cover_position",
     "cover/set_cover_tilt_position",

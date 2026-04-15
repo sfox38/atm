@@ -117,7 +117,7 @@ class TokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "created_at": self.created_at.isoformat(),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
             "created_by": self.created_by,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "revoked": self.revoked,
@@ -201,9 +201,9 @@ class ArchivedTokenRecord:
         return {
             "id": self.id,
             "name": self.name,
-            "created_at": self.created_at.isoformat(),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
             "created_by": self.created_by,
-            "revoked_at": self.revoked_at.isoformat(),
+            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
             "revoked": self.revoked,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,

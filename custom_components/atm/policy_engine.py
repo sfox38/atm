@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta
 from enum import Enum
@@ -13,8 +14,10 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 
-from .const import BLOCKED_DOMAINS, SENSITIVE_ATTRIBUTES
+from .const import BLOCKED_DOMAINS, DOMAIN, SENSITIVE_ATTRIBUTES
 from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Permission(str, Enum):
@@ -60,12 +63,18 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
 
     domain = entity_id.split(".")[0]
 
-    # Ghost check (before pass-through short-circuit so ghosts are never accessible)
-    if hass.states.get(entity_id) is None and registry.async_get(entity_id) is None:
+    # Ghost check (before pass-through short-circuit so ghosts are never accessible).
+    # entry is already the registry lookup result; no second call needed.
+    if hass.states.get(entity_id) is None and entry is None:
         return Permission.NOT_FOUND
 
     # ATM blocklist - applies even in pass-through mode
     if domain in BLOCKED_DOMAINS:
+        return Permission.NO_ACCESS
+
+    # Block ATM's own internal sensor entities regardless of pass_through or permission grants.
+    # These live under the sensor domain so BLOCKED_DOMAINS does not catch them.
+    if entry is not None and entry.platform == DOMAIN:
         return Permission.NO_ACCESS
 
     # Pass-through bypasses all entity permission resolution
@@ -126,10 +135,15 @@ def filter_entities_for_token(
     Always scrubs sensitive attributes and blocks the ATM domain, even in pass-through mode.
     """
     if token.pass_through:
+        registry = er.async_get(hass)
         return [
             scrub_sensitive_attributes(e)
             for e in entities
             if e.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+            and not (
+                (entry := registry.async_get(e.entity_id)) is not None
+                and entry.platform == DOMAIN
+            )
         ]
     return [
         scrub_sensitive_attributes(e)
@@ -371,13 +385,22 @@ def parse_relative_time(value: str) -> datetime:
         raise ValueError(f"Unrecognized relative time format: {value!r}")
     n = int(match.group(1))
     unit = match.group(2)
+    _MAX_DAYS = 366
     if unit == "h":
+        if n > _MAX_DAYS * 24:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of {_MAX_DAYS} days.")
         delta = timedelta(hours=n)
     elif unit == "d":
+        if n > _MAX_DAYS:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of {_MAX_DAYS} days.")
         delta = timedelta(days=n)
     elif unit == "w":
+        if n > 52:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of 52 weeks.")
         delta = timedelta(weeks=n)
     else:
+        if n > 12:
+            raise ValueError(f"Relative time {value!r} exceeds the maximum allowed range of 12 months.")
         delta = timedelta(days=30 * n)
     return utcnow() - delta
 

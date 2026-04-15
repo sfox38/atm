@@ -309,7 +309,11 @@ class ATMServiceView(HomeAssistantView):
                 {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
                 200, request_id, rl_result, extra_headers=extra,
             )
-        except (ServiceNotFound, HomeAssistantError):
+        except ServiceNotFound:
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip)
+            return _error("not_found", "Service not found.", 404, request_id)
+        except HomeAssistantError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
