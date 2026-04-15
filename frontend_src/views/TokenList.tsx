@@ -144,7 +144,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                     <td style={{ fontWeight: 500 }}>{t.name}</td>
                     <td>
                       {t.pass_through ? (
-                        <span className="badge badge-amber">Full Access</span>
+                        <span className="badge badge-amber">Pass Through</span>
                       ) : (
                         <span className="badge badge-blue">Scoped</span>
                       )}

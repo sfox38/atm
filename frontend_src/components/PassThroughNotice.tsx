@@ -31,10 +31,10 @@ export function PassThroughNotice({ token, onUpdate }: Props) {
     <div>
       <div className="pass-through-header-banner">
         <p>
-          <strong style={{ color: "var(--warning-color, #ff9800)" }}>Full Access token.</strong> This token has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, expiry, rate limiting, and audit logging are active.
+          <strong style={{ color: "var(--warning-color, #ff9800)" }}>Pass Through token.</strong> This token bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked.
         </p>
         <p style={{ marginTop: 8 }}>
-          Restarting or stopping Home Assistant, controlling locks and alarms, and writing automations and scripts still require their respective flags to be enabled. These are configurable in the left panel.
+          The flags for restarting Home Assistant, controlling physical devices (locks and alarms), writing automations, writing scripts, and reading logs must still be individually enabled below.
         </p>
         <p style={{ marginTop: 8 }}>
           This token works only with HTTP-based MCP clients (such as Claude Code with <code>--transport http</code>). It cannot be used with stdio-based MCP server setups.

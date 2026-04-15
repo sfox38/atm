@@ -61,7 +61,7 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
                 <td>{t.name}</td>
                 <td>
                   {t.pass_through ? (
-                    <span className="badge badge-amber">Full Access</span>
+                    <span className="badge badge-amber">Pass Through</span>
                   ) : (
                     <span className="badge badge-blue">Scoped</span>
                   )}

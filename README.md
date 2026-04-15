@@ -1,8 +1,10 @@
 # Advanced Token Management (ATM)
 
-Home Assistant's native MCP server gives every connected AI client the same unrestricted access to your home. ATM is a drop-in replacement - it implements all 20 native HA MCP tools with identical names and response formats, so your existing AI client setup works without changes. The difference is control: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
+Why give your AI agent basically unrestricted access to your home? ATM is a drop-in replacement for Home Assistant's native MCP server - security focused, ATM implements all 20 native HA MCP tools so your existing AI client setup works without changes. 
 
-ATM runs entirely inside Home Assistant's web server. No extra process, no cloud dependency, no configuration beyond the ATM panel.
+The difference is control: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
+
+ATM runs entirely inside Home Assistant. No extra process, no cloud dependency, no configuration beyond the ATM panel.
 
 ---
 
@@ -10,10 +12,10 @@ ATM runs entirely inside Home Assistant's web server. No extra process, no cloud
 
 | | LLAT + native MCP | ATM token |
 |---|---|---|
-| MCP tool compatibility | 20 native tools | Same 20 tools, identical names and responses |
+| MCP tool compatibility | 20 native tools | Same 20 tools, identical names and responses; plus xx additional tools |
 | MCP Prompts and Resources | Native HA behavior | Identical for pass-through tokens; permission-scoped for scoped tokens |
-| Client reconfiguration needed | - | URL change only |
-| Entity filtering | Binary expose/hide, same for all clients | Four permission states, per token |
+| Client reconfiguration needed | /api/mcp | /api/atm/mcp (URL change only) |
+| Entity filtering | Binary: expose/hide, same for all clients | Four permission states, per token |
 | Per-client control | No - all clients see the same exposed entities | Yes - each token has independent permissions |
 | Read-only access | No | Yes - YELLOW state allows reads, blocks writes |
 | Audit trail | None | Every request logged with outcome and entity |
@@ -35,7 +37,7 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 - [Available MCP Tools](#available-mcp-tools)
 
 **Reference**
-- [The Permissions Panel](#the-permissions-panel) - tree, Select by Area, Permission Summary, Effective Permission Simulator
+- [The Permissions Panel](#the-permissions-panel) 
 - [The Permission System](#the-permission-system)
 - [Capability Flags](#capability-flags)
 - [Pass-Through Mode](#pass-through-mode)
@@ -52,9 +54,6 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 ## Requirements
 
 - Home Assistant 2024.5 or later
-- Python 3.11 or later (bundled with HA)
-- No additional Python packages required
-
 ---
 
 ## Installation
@@ -124,7 +123,7 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 
 ## Available MCP Tools
 
-ATM implements all 20 native HA MCP tools using the same tool names and response formats, and exposes the same MCP Prompts and Resources as the native HA MCP server. It also adds ATM-specific tools for direct entity access and system operations. All tools, prompts, and resources are scoped to the token's permission tree. Pass-through tokens receive the same prompt and resource content as the native HA MCP server.
+ATM implements all 20 native HA MCP tools using the same tool names and response formats, and exposes the same MCP Prompts and Resources as the native HA MCP server. It also adds ATM-specific tools for direct entity access and system operations. All tools, prompts, and resources are scoped to the token's Permissions Tree. Pass-through tokens receive the same prompt and resource content as the native HA MCP server.
 
 **Native HA MCP tools** - functionally identical to the native HA MCP server:
 
@@ -145,7 +144,7 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `HassCancelAllTimers` | Cancel all timers in an area |
 | `HassStopMoving` | Stop a moving cover or device |
 
-**ATM entity tools** - direct entity access filtered by the permission tree:
+**ATM entity tools** - direct entity access filtered by the Permissions Tree:
 
 | Tool | Description |
 |---|---|
@@ -180,26 +179,405 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `homeassistant://assist/context-snapshot` | Current entity state snapshot. Same URI as the native HA MCP server; content is scoped to the token's permissions. |
 | `atm://server-info` | ATM server metadata, token info, and version. JSON format. |
 
-Claude can only see and act on entities within the token's permission scope. Native tools silently skip inaccessible entities without revealing they exist.
+Claude can only see and act on entities within the token's permission scope.
 
 > [!NOTE]
 > After enabling or disabling a capability flag, your MCP client must reconnect to receive the updated tool list. In Claude Code, use the `/mcp` menu and select **Reconnect**.
 
 ---
 
+## Tools Reference
+
+### Query and Entity Access
+
+#### `get_state`
+Returns the current state of a single entity. Requires READ or WRITE permission on the entity.
+
+**Parameters:**
+- `entity_id` (string, required) - Entity ID (e.g., `light.living_room`)
+
+**Returns:** Object with `state`, `attributes`, and `last_changed` timestamp. Sensitive attributes are always scrubbed.
+
+---
+
+#### `get_states`
+Returns all entity states accessible to the token. Filtered by the Permissions Tree - only entities with READ or WRITE permission are included.
+
+**Parameters:** None
+
+**Returns:** Array of state objects. Pass-through tokens receive all non-ATM entities.
+
+---
+
+#### `get_history`
+Returns historical state changes for an entity. Supports relative time strings: `24h` (24 hours ago), `7d` (7 days ago), `2w` (2 weeks ago), `1m` (30 days ago). Max range is 7 days.
+
+**Parameters:**
+- `entity_id` (string, required) - Entity ID
+- `start_time` (string, optional) - ISO timestamp or relative string. Defaults to 24 hours ago.
+- `end_time` (string, optional) - ISO timestamp or relative string. Defaults to now.
+
+**Returns:** Array of history entries with `state` and `timestamp`. If the range exceeds 7 days, it is silently clamped. Actual queried range is returned in `X-ATM-History-Start` and `X-ATM-History-End` response headers.
+
+---
+
+#### `get_statistics`
+Returns long-term statistics for numeric entities. Supports hourly, daily, weekly, monthly, or 5-minute aggregation.
+
+**Parameters:**
+- `entity_id` (string, required) - Entity ID
+- `start_time` (string, optional) - ISO timestamp or relative string
+- `end_time` (string, optional) - ISO timestamp or relative string
+- `period` (string, optional) - One of `5minute`, `hour`, `day`, `week`, `month`. Defaults to `hour`.
+
+**Returns:** Statistics array with `min`, `max`, `mean`, `sum`, and `state` values for each period.
+
+---
+
+#### `get_live_context`
+YAML snapshot of all accessible entity states in a format optimized for LLM context. Equivalent to the native HA MCP `GetLiveContext` tool but filtered by the token's permissions.
+
+**Parameters:** None
+
+**Returns:** YAML-formatted string with entity states. Pass-through tokens receive the same output as the native HA MCP server.
+
+---
+
+#### `get_date_time`
+Returns the current date, time, and timezone. Does not require any special permissions.
+
+**Parameters:** None
+
+**Returns:** Object with `date` (YYYY-MM-DD), `time` (HH:MM:SS), and `timezone`.
+
+---
+
+### Service Execution
+
+#### `call_service`
+Call any HA service. Requires appropriate permission for the target entities.
+
+**Parameters:**
+- `service` (string, required) - Service name in `domain/service` format (e.g., `light/turn_on`)
+- `entity_id` (array, optional) - Explicit entity IDs
+- `device_id` (array, optional) - Device IDs (expanded to entity list internally)
+- `area_id` (array, optional) - Area IDs (expanded to entity list internally)
+- `data` (object, optional) - Service parameters
+
+**Behavior:**
+- `device_id` and `area_id` are expanded to explicit entity lists before calling HA. Denied entities are silently excluded.
+- If all entities in the call resolve to denied, returns 403.
+- Service responses are scanned for entity IDs. Any inaccessible ID is replaced with `<redacted>`.
+- Physical control services (lock, alarm, cover mutation) require `allow_physical_control` flag even with WRITE permission.
+- Restart and stop services require `allow_restart` flag.
+
+**Returns:** Service response data (if the service declares a response schema). Some services return nothing.
+
+---
+
+#### `intent_action`
+Call a named intent with area, device, or floor targeting. Resolves intent parameters through the Permissions Tree and only includes accessible entities.
+
+**Parameters:**
+- `name` (string, required) - Intent name (e.g., `TurnOn`, `SetTemperature`)
+- `area` (string, optional) - Area name
+- `floor` (string, optional) - Floor name
+- `domain` (array, optional) - Domain(s) to limit matching entities
+- `device_class` (array, optional) - Device class(es) to limit matching entities
+
+**Behavior:**
+- Area and floor matching is case-insensitive.
+- After resolving intent targets, ATM filters the result to only entities with WRITE permission.
+- If no accessible entities match the intent, returns "No accessible entities matched."
+- Returned response follows the native HA MCP action tool format.
+
+---
+
+### Configuration and Diagnostics
+
+#### `get_config`
+Read HA configuration data. Requires `allow_config_read` flag.
+
+**Parameters:** None
+
+**Returns:** HA configuration object including integrations, packages, automation, and scripting settings.
+
+---
+
+#### `get_logs`
+Read recent HA system log entries. Requires `allow_log_read` flag. ATM's own log entries are always excluded. Token values are scrubbed from messages and tracebacks.
+
+**Parameters:**
+- `limit` (integer, optional) - Number of entries to return. Defaults to 50. Max 100.
+- `level` (string, optional) - Minimum log level. One of `INFO`, `WARNING`, `ERROR`. Defaults to `WARNING`.
+
+**Returns:** Array of log entries with `timestamp`, `level`, `logger`, and `message`.
+
+---
+
+#### `render_template`
+Render a Jinja2 template with access to HA state. Requires `allow_template_render` flag. The template environment is permission-scoped - templates can only access entities the token has READ or WRITE permission for.
+
+**Parameters:**
+- `template` (string, required) - Jinja2 template string
+
+**Returns:** Rendered template result as a string.
+
+---
+
+### Automation and Script Management
+
+#### `create_automation`
+Create a new automation in `automations.yaml`. Requires `allow_automation_write` flag. This tool does NOT consult the Permissions Tree - it writes to YAML directly.
+
+**Parameters:**
+- `alias` (string, required) - Automation friendly name
+- `trigger` (array, required) - Trigger array in HA automation format
+- `action` (array, required) - Action array in HA automation format
+- `condition` (array, optional) - Condition array
+- `mode` (string, optional) - One of `single`, `restart`, `queued`, `parallel`. Defaults to `single`.
+
+**Returns:** Created automation config with assigned ID.
+
+**Security note:** See [Automation and script write flags](#automation-and-script-write-flags).
+
+---
+
+#### `edit_automation`
+Edit an existing automation. Requires `allow_automation_write` flag and valid automation ID.
+
+**Parameters:**
+- `automation_id` (string, required) - Automation ID (the slug)
+- All parameters from `create_automation` (replaces the entire config)
+
+**Returns:** Updated automation config.
+
+---
+
+#### `delete_automation`
+Delete an automation. Requires `allow_automation_write` flag.
+
+**Parameters:**
+- `automation_id` (string, required) - Automation ID to delete
+
+**Returns:** Confirmation message.
+
+---
+
+#### `create_script`
+Create a new script in `scripts.yaml`. Requires `allow_script_write` flag. This tool does NOT consult the Permissions Tree.
+
+**Parameters:**
+- `script_id` (string, required) - Script slug (lowercase alphanumeric and underscore only)
+- `alias` (string, required) - Script friendly name
+- `sequence` (array, required) - Sequence of actions in HA script format
+- `mode` (string, optional) - One of `single`, `restart`, `queued`, `parallel`. Defaults to `single`.
+- `variables` (object, optional) - Script-level variables
+- `fields` (object, optional) - Input field definitions for callable scripts
+
+**Returns:** Created script config.
+
+**Security note:** See [Automation and script write flags](#automation-and-script-write-flags).
+
+---
+
+#### `edit_script`
+Edit an existing script. Requires `allow_script_write` flag and valid script ID.
+
+**Parameters:**
+- `script_id` (string, required) - Script ID (the slug)
+- All parameters from `create_script` (replaces the entire config)
+
+**Returns:** Updated script config.
+
+---
+
+#### `delete_script`
+Delete a script. Requires `allow_script_write` flag.
+
+**Parameters:**
+- `script_id` (string, required) - Script ID to delete
+
+**Returns:** Confirmation message.
+
+---
+
+### System and Control
+
+#### `restart_ha`
+Restart Home Assistant. Requires `allow_restart` flag. This is a pass-through-exempt capability - even pass-through tokens must have this flag enabled.
+
+**Parameters:** None
+
+**Returns:** Confirmation that restart has been queued.
+
+---
+
+### Native HA MCP Tools
+
+The following tools are functionally identical to the native HA MCP server. They use the same tool names, parameters, and response formats. All are scoped to the token's Permissions Tree.
+
+#### `HassTurnOn` / `HassTurnOff`
+Turn entities on or off by area, name, floor, or domain.
+
+**Parameters:**
+- `area` (string, optional) - Area name
+- `floor` (string, optional) - Floor name
+- `name` (string, optional) - Entity friendly name
+- `domain` (array, optional) - Domain(s)
+- `device_class` (array, optional) - Device class(es)
+
+**Behavior:** Returns action_done with a list of successfully controlled entities and a list of failed entities. Only entities with WRITE permission are included. If no accessible entities match, returns "No accessible entities matched."
+
+---
+
+#### `HassLightSet`
+Set brightness, color, or color temperature of accessible lights.
+
+**Parameters:**
+- `area` (string, optional) - Area name
+- `floor` (string, optional) - Floor name
+- `name` (string, optional) - Light friendly name
+- `brightness` (integer 0-100, optional) - Brightness percentage
+- `color` (string, optional) - CSS color name or hex
+- `temperature` (integer, optional) - Color temperature in kelvin
+
+---
+
+#### `HassFanSetSpeed`
+Set fan speed by percentage.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+- `percentage` (integer 0-100, required) - Fan speed percentage
+
+---
+
+#### `HassClimateSetTemperature`
+Set climate device target temperature.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+- `temperature` (number, required) - Target temperature
+
+---
+
+#### `HassSetPosition`
+Set position of covers, blinds, or similar devices (0-100).
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+- `position` (integer 0-100, required) - Position percentage
+
+---
+
+#### `HassSetVolume` / `HassSetVolumeRelative`
+Set or adjust media player volume.
+
+**HassSetVolume Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+- `volume_level` (integer 0-100, required) - Absolute volume
+
+**HassSetVolumeRelative Parameters:**
+- `volume_step` (string or integer, required) - One of `"up"`, `"down"`, or an integer percentage change (-100 to 100)
+
+---
+
+#### `HassMediaPause` / `HassMediaUnpause`
+Pause or resume media playback.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+
+---
+
+#### `HassMediaNext` / `HassMediaPrevious`
+Skip to next or previous track.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+
+---
+
+#### `HassMediaSearchAndPlay`
+Search and play media on a player.
+
+**Parameters:**
+- `search_query` (string, required) - What to search for
+- `media_class` (string, optional) - Media type (album, artist, track, playlist, etc.)
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+
+---
+
+#### `HassMediaPlayerMute` / `HassMediaPlayerUnmute`
+Mute or unmute a media player.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+
+---
+
+#### `HassCancelAllTimers`
+Cancel all running timers in an area.
+
+**Parameters:**
+- `area` (string, optional) - Area name. If omitted, cancels timers in all areas.
+
+**Returns:** action_done with `speech_slots: { "canceled": N }` where N is the count of canceled timers.
+
+---
+
+#### `HassStopMoving`
+Stop a moving cover or similar device.
+
+**Parameters:**
+- `area` (string, optional)
+- `floor` (string, optional)
+- `name` (string, optional)
+
+---
+
+#### `HassBroadcast`
+Send an announcement through Assist satellite devices. Requires `allow_broadcast` flag.
+
+**Parameters:**
+- `message` (string, required) - Message to announce
+
+**Returns:** action_done on success.
+
+---
+
+
+
 ## Using Third-Party MCP Servers
 
 Third-party MCP servers such as ha-mcp run as standalone processes and make calls directly to HA's native REST API (`/api/`). HA's authentication middleware only accepts Long-Lived Access Tokens - it has no knowledge of ATM tokens. As a result, ATM tokens cannot be used as a drop-in replacement for a LLAT with these servers.
 
-If you want scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your permission tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
+If you want scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your Permissions Tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
 
 ---
 
 ## The Permissions Panel
 
-When you open a token in the ATM panel, the token detail page shows the **Entity Permissions** tree on the right side of the screen. Domains sit at the top level, devices nest underneath, and individual entities live at the leaves. You expand a domain to see its devices, expand a device to see its entities.
+When you open a token in the ATM panel, the token detail page shows the **Permissions Tree** tree on the right side of the screen. Domains sit at the top level, devices nest underneath, and individual entities live at the leaves. You expand a domain to see its devices, expand a device to see its entities.
 
-### The permission buttons
+### The Permissions Tree
 
 Each row in the tree has four colored buttons. Click one to set the permission state for that node:
 
@@ -212,21 +590,21 @@ You do not have to set every node individually. The typical pattern is to set a 
 
 ### Select by Area
 
-The **Select by Area** button at the top of the Entity Permissions card lets you bulk-apply a permission state to all entities in a HA area at once. Pick the area, pick the state (READ, WRITE, DENY, or remove grant), and ATM sets every entity in that area in one step. Useful for quickly scoping a token to a room without clicking through the tree manually.
+The **Select by Area** button at the top of the Permissions Tree card lets you bulk-apply a permission state to all entities in a HA area at once. Pick the area, pick the state (READ, WRITE, DENY, or remove grant), and ATM sets every entity in that area in one step. Useful for quickly scoping a token to a room without clicking through the tree manually.
+
+### The Effective Permission Emulator
+
+The **Effective Permission  Emulator** shows you what ATM will actually decide for any entity. Type an entity ID (or click one in the tree or Permission Summary) and ATM runs the full two-pass resolver and shows you the result: WRITE, READ, or no access, which node in the ancestor chain determined the outcome, and the hint text if one is set.
+
+This is the fastest way to verify your tree is doing what you intended. If the result surprises you, the path output tells you exactly which ancestor is overriding it.
 
 ### The Permission Summary
 
-Below the Effective Permission Simulator is the **Permission Summary** - a compact table listing every node in the permission tree that has been explicitly set to something other than ⬜ GREY. It shows the node type (Domain, Device, or Entity), the friendly name, the ID, and the current state.
+Below the Effective Permission Emulator is the **Permission Summary** - a compact table listing every node in the Permissions Tree that has been explicitly set to something other than ⬜ GREY. It shows the node type (Domain, Device, or Entity), the friendly name, the ID, and the current state.
 
-You can sort the table by any column. Clicking an entity row in the Permission Summary populates the Effective Permission Simulator with that entity, just like clicking it in the tree.
+You can sort the table by any column. Clicking an entity row in the Permission Summary populates the Effective Permission Emulator with that entity, just like clicking it in the tree.
 
 If the table is empty, no explicit grants have been set and the token has no access to anything.
-
-### The Effective Permission Simulator
-
-The **Effective Permission Simulator** shows you what ATM will actually decide for any entity. Type an entity ID (or click one in the tree or Permission Summary) and ATM runs the full two-pass resolver and shows you the result: WRITE, READ, or no access, which node in the ancestor chain determined the outcome, and the hint text if one is set.
-
-This is the fastest way to verify your tree is doing what you intended. If the result surprises you, the path output tells you exactly which ancestor is overriding it.
 
 ### Quick examples
 
@@ -234,7 +612,7 @@ This is the fastest way to verify your tree is doing what you intended. If the r
 Set the `light` domain to 🟡 YELLOW. Set `light.living_room` to 🟢 GREEN. Every light is readable; only the living room light is writable.
 
 **Full access except the guest bedroom:**
-Set your domains to 🟢 GREEN. Set the guest bedroom device to 🔴 RED. Every entity on that device becomes completely inaccessible, regardless of the domain setting.
+Set your a domain to 🟢 GREEN. Set a guest bedroom device to 🔴 RED. Every entity on that device becomes completely inaccessible, regardless of the domain setting.
 
 **Block one noisy sensor inside an otherwise permitted device:**
 Set the device to 🟢 GREEN. Set just that sensor entity to 🔴 RED.
@@ -245,7 +623,7 @@ For a detailed explanation of how ATM resolves permissions under the hood, see [
 
 ## The Permission System
 
-Every token has a permission tree organized into three levels: domains, devices, and entities. Each node carries one of four states.
+Every token has a Permissions Tree organized into three levels: domains, devices, and entities. Each node carries one of four states.
 
 ### The four states
 
@@ -297,11 +675,11 @@ Granting WRITE (🟢 GREEN) to entities in these domains allows a client to:
 - Run a script (`script.turn_on`) - same
 - Activate a scene (`scene.turn_on`) - applies a preset that can set state on any entity in the scene
 
-ATM checks the token's permission for the automation, script, or scene entity itself. But the downstream effects - the lights that get turned on, the locks that get toggled, the climate changes - happen entirely outside ATM's scope. A token with no lock access but WRITE on `automation.*` can still unlock a door if a triggered automation does it.
+ATM checks the token's permission for the automation, script, or scene entity itself. But the downstream effects - the lights that get turned on, the locks that get toggled, the climate changes - happen entirely outside ATM's scope. A token with NO_ACCESS to a door, but WRITE on `automation.*` can still unlock a door if a triggered automation does it.
 
 Granting READ (🟡 YELLOW) to these domains is safe. It allows reading whether an automation is enabled or a scene exists, without the ability to trigger anything.
 
-The entity permissions tree marks `automation`, `script`, and `scene` with a [!] badge as a reminder of this risk.
+The Permissions Tree marks `automation`, `script`, and `scene` with a [!] badge as a reminder of this risk.
 
 ### What ATM always blocks
 
@@ -332,11 +710,11 @@ The five pass-through-exempt flags (`allow_restart`, `allow_physical_control`, `
 
 ### Automation and script write flags
 
-`allow_automation_write` and `allow_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully control.
+`allow_automation_write` and `allow_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully trust and control.
 
-**These flags are all-or-nothing.** The automation and script write tools (`create_automation`, `edit_automation`, `delete_automation`, `create_script`, `edit_script`, `delete_script`) write directly to `automations.yaml` and `scripts.yaml`. They do not consult the token's entity permission tree. A client with `allow_automation_write` enabled can write an automation referencing any entity in Home Assistant, regardless of what the token is permitted to access directly via `get_state` or `call_service`.
+**These flags are all-or-nothing.** The automation and script write tools (`create_automation`, `edit_automation`, `delete_automation`, `create_script`, `edit_script`, `delete_script`) write directly to `automations.yaml` and `scripts.yaml`. They do not consult the token's Permissions Tree. A client with `allow_automation_write` enabled can write an automation referencing any entity in Home Assistant, regardless of what the token is permitted to access directly via `get_state` or `call_service`.
 
-**The entity permission tree cannot restrict automation/script write.** Setting the `automation` or `script` domain to READ or DENY in the permission tree has no effect on these MCP tools. A DENY on `automation.*` only blocks entity-scoped operations (reading automation entity state, calling `automation.trigger`). It does not prevent the write tools from creating or modifying automation YAML.
+**The Permissions Tree cannot restrict automation/script write.** Setting the `automation` or `script` domain to READ or DENY in the Permissions Tree has no effect on these MCP tools. A DENY on `automation.*` only blocks entity-scoped operations (reading automation entity state, calling `automation.trigger`). It does not prevent the write tools from creating or modifying automation YAML.
 
 **Triggered actions run outside ATM.** An automation or script created through ATM is triggered by HA's own automation engine, which runs under HA's own context, not ATM's. Permission checks do not apply to the actions taken when a triggered automation runs.
 
@@ -346,7 +724,7 @@ In practice, a token with a narrow entity scope but `allow_automation_write` ena
 
 ## Pass-Through Mode
 
-Pass-through tokens bypass the three-level permission check and have 🟢 GREEN access to all entities. They are intended for trusted tools where managing a full permission tree is impractical.
+Pass-through tokens bypass the three-level permission check and have 🟢 GREEN access to all entities. They are intended for trusted tools where managing a full Permissions Tree is impractical or unnecessary.
 
 Pass-through does NOT bypass:
 
@@ -361,7 +739,7 @@ Pass-through does NOT bypass:
 
 These five flags must always be explicitly enabled regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed.
 
-The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true`. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use a scoped permission tree instead.
+The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true`. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use the scoped Permissions Tree instead.
 
 ---
 
@@ -394,17 +772,39 @@ If `notify_on_rate_limit` is enabled in global settings, HA creates a persistent
 
 - Every request is validated against the full two-pass permission algorithm. No endpoint implements its own shortcut.
 - Entity not found and entity inaccessible return identical response bodies. A caller cannot determine whether an entity exists or is simply blocked.
-- Sensitive attributes are stripped from every state response, for every token type.
+- Sensitive attributes are stripped from every state response, for every token type. See [Sensitive attributes stripping](#sensitive-attributes-stripping).
 - Service calls that include `device_id` or `area_id` are always expanded to an explicit entity list before being passed to HA. Denied entities are silently excluded.
 - If all entities in a service call resolve to denied, ATM returns 403 rather than calling HA with an empty list.
 - Service response data is scanned for entity IDs. Any entity ID the token cannot access is replaced with `"<redacted>"`.
 - If an entity ID in a service call does not exist in the HA entity registry, ATM returns 403. Entity creation via service calls is not permitted.
 - Physical control services (`lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`, and related services) require `allow_physical_control` in addition to entity-level WRITE permission. This applies even to pass-through tokens.
-- Automation and script write MCP tools bypass the entity permission tree. Setting the `automation` or `script` domain to RED or YELLOW does not prevent these tools from writing YAML. See [Automation and script write flags](#automation-and-script-write-flags).
+- Automation and script write MCP tools bypass the Permissions Tree. Setting the `automation` or `script` domain to RED or YELLOW does not prevent these tools from writing YAML. See [Automation and script write flags](#automation-and-script-write-flags).
+
+### Sensitive attributes stripping
+
+ATM removes four sensitive attributes from every state response, regardless of token type or permission level:
+
+1.  **`entity_picture`**  - URLs to entity images/icons, often containing authentication tokens or private asset paths
+2.  **`stream_url`**  - Direct stream URLs (e.g., from cameras), which may contain credentials or expose internal network topology
+3.  **`access_token`**  - Authentication tokens embedded in entity state (e.g., from integrations that store temporary credentials)
+4.  **`still_image_url`**  - Static image URLs that might contain sensitive identifiers or auth parameters
+
+**Why all tokens, all the time:**
+
+-   Even pass-through tokens (which bypass entity permissions) still get these attributes scrubbed. A pass-through token that can call any service doesn't need access to embedded credentials—it already has the power to act.
+-   Even high-permission scoped tokens with WRITE access get these attributes scrubbed. Permission grants control what  _actions_  a token can take, not what  _secrets_  it can read.
+-   This prevents accidental credential leakage through state snapshots, audit logs, or third-party integrations that consume ATM responses.
+
+**Where stripping happens:**
+
+-   Proxy view:  `/api/atm/states`,  `/api/atm/entities/{entity_id}`,  `/api/atm/history`, etc.
+-   MCP tools:  `GetLiveContext`,  `GetEntityHistory`,  `GetEntityState`, etc.
+-   Service response data filtering: If a service returns entity state in its response (e.g., a script fetching entity details), those attributes are redacted before returning to the caller.
+
 
 ### Token lifecycle
 
-**Rotation** generates a new raw token value for an existing token while keeping all of its permissions, capability flags, rate limit settings, and audit history intact. The old value is invalidated the moment rotation is confirmed - there is no grace period. The new value is shown once and cannot be retrieved again. Use rotation when you suspect a token value has been exposed but do not want to rebuild the permission tree from scratch.
+**Rotation** generates a new raw token value for an existing token while keeping all of its permissions, capability flags, rate limit settings, and audit history intact. The old value is invalidated the moment rotation is confirmed - there is no grace period. The new value is shown once and cannot be retrieved again. Use rotation when you suspect a token value has been exposed but do not want to rebuild the Permissions Tree from scratch.
 
 **Revocation** permanently retires a token. When a token is revoked, ATM immediately archives it to storage, terminates all open SSE connections for that token, destroys its rate limiter state, removes its sensor entities, and fires an `atm_token_revoked` event. All of this happens before the revoke response is returned.
 
@@ -436,7 +836,7 @@ ATM creates six HA sensor entities for each active token. For a token named `cla
 | `sensor.atm_claude_code_status` | `active`, `expired`, or `revoked` |
 | `sensor.atm_claude_code_request_count` | Total requests made with this token |
 | `sensor.atm_claude_code_denied_count` | Requests blocked by permission rules |
-| `sensor.atm_claude_code_rate_limit_hits` | Times this token was rate limited |
+| `sensor.atm_claude_code_rate_limit_hits` | Times this token was last rate limited |
 | `sensor.atm_claude_code_last_access` | Timestamp of the most recent request |
 | `sensor.atm_claude_code_expires_in` | Days until expiry, or `No expiry` if no expiry is set |
 
@@ -463,7 +863,7 @@ Sensors are removed automatically when a token is revoked. ATM sensors are block
 
 ## Audit Log
 
-ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings.
+ATM keeps a circular buffer of requests, queryable from the ATM panel or via the admin API. The default capacity is 10,000 entries, configurable in Global Settings. You can view the Audit Log in the AUDIT tab of the ATM panel - click on a row to get full information for an event.
 
 Each entry records a unique request ID (matching the `X-ATM-Request-ID` response header), timestamp, token ID and name, HTTP method, resource path, outcome, and client IP.
 
@@ -505,7 +905,7 @@ Event data includes `token_id`, `token_name`, and `timestamp`. Revocation and ro
 GET/POST   /api/atm/admin/tokens                              List or create tokens
 GET/PATCH  /api/atm/admin/tokens/{id}                         Get or update a token
 DELETE     /api/atm/admin/tokens/{id}                         Revoke a token
-GET/PUT    /api/atm/admin/tokens/{id}/permissions             Read or replace permission tree
+GET/PUT    /api/atm/admin/tokens/{id}/permissions             Read or replace permissions tree
 PATCH      /api/atm/admin/tokens/{id}/permissions/domains/{node}
 PATCH      /api/atm/admin/tokens/{id}/permissions/devices/{node}
 PATCH      /api/atm/admin/tokens/{id}/permissions/entities/{node}
@@ -547,3 +947,5 @@ GET        /api/atm/mcp/context                               Token context summ
 ## Issues and Feedback
 
 Report issues at https://github.com/sfox38/atm/issues.
+
+

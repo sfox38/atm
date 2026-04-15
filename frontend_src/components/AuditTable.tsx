@@ -50,7 +50,7 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
         <h3 className="modal-title" style={{ marginBottom: 12 }}>Audit Entry</h3>
         <DetailRow label="Time" value={formatTs(entry.timestamp)} />
         <DetailRow label="Token" value={entry.token_name} />
-        <DetailRow label="Mode" value={entry.pass_through ? "Full Access" : "Scoped"} />
+        <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
         <DetailRow label="Method" value={entry.method} mono />
         <DetailRow label="Resource" value={entry.resource} mono />
         <DetailRow label="Outcome" value={OUTCOME_LABEL[entry.outcome] ?? entry.outcome} />
