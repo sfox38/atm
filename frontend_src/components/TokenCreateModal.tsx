@@ -213,7 +213,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
 
         <div className="toggle-row">
           <div className="toggle-label">
-            <span>Pass-through mode (Full Access)</span>
+            <span>Pass-through mode</span>
             <small>Bypasses all entity and capability checks. Equivalent to a Long-Lived Access Token.</small>
           </div>
           <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>

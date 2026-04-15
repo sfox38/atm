@@ -45,7 +45,7 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
     """Resolve effective permission for entity_id against a token.
 
     Return values:
-        Permission.WRITE      - full access
+        Permission.WRITE      - write access (unrestricted for pass-through tokens)
         Permission.READ       - read-only access
         Permission.DENY       - explicitly denied; audit outcome: denied
         Permission.NO_ACCESS  - no grant found; audit outcome: denied

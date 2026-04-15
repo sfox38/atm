@@ -78,7 +78,7 @@ const FLAGS: FlagDef[] = [
   {
     key: "use_assist_exposure",
     label: "Use HA Assist entity scope",
-    description: "Limits entity access to entities exposed in HA's Assist settings, matching native HA MCP server behaviour. Applies to Full Access tokens only.",
+    description: "Limits entity access to entities exposed in HA's Assist settings, matching native HA MCP server behaviour. Applies to Pass Through tokens only.",
     passThoughOnly: true,
     alwaysShown: true,
   },

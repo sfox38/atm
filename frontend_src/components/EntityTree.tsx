@@ -17,6 +17,7 @@ interface Props {
   permissions: PermissionTree;
   onPermissionsChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string) => void;
+  collapseKey?: number;
 }
 
 function effectivePermission(
@@ -204,11 +205,12 @@ interface DeviceGroupProps {
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string) => void;
+  collapseKey?: number;
 }
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
@@ -220,6 +222,11 @@ function DeviceGroup({
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
+
+  // Collapse when collapseKey changes
+  useEffect(() => {
+    setExpanded(false);
+  }, [collapseKey]);
 
   async function setDeviceState(newState: NodeState) {
     try {
@@ -292,10 +299,11 @@ interface DomainGroupProps {
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string) => void;
+  collapseKey?: number;
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -308,6 +316,11 @@ function DomainGroup({
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
+
+  // Collapse when collapseKey changes
+  useEffect(() => {
+    setExpanded(false);
+  }, [collapseKey]);
 
   async function setDomainState(newState: NodeState) {
     try {
@@ -369,6 +382,7 @@ function DomainGroup({
               allEntityIds={allEntityIds}
               onPermChange={onPermChange}
               onEntityClick={onEntityClick}
+              collapseKey={collapseKey}
             />
           ))}
           {domainData.deviceless_entities.length > 0 && (
@@ -424,7 +438,7 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -484,6 +498,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
           allEntityIds={allEntityIds}
           onPermChange={onPermissionsChange}
           onEntityClick={onEntityClick}
+          collapseKey={collapseKey}
         />
       ))}
     </div>

@@ -101,6 +101,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [ptConfirmed, setPtConfirmed] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [permissionsVersion, setPermissionsVersion] = useState(0);
+  const [collapseTreeKey, setCollapseTreeKey] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -154,6 +155,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       const updatedTree = await api.setPermissions(tokenId, { domains: {}, devices: {}, entities: {} });
       setToken((t) => t ? { ...t, permissions: updatedTree } : t);
       setPermissionsVersion((v) => v + 1);
+      setCollapseTreeKey((k) => k + 1);
       setShowClearPerms(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to clear permissions.");
@@ -202,7 +204,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       {token.pass_through && (
         <div className="pass-through-header-banner">
           <p>
-            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Full Access token.</strong> It has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, expiry, rate limiting, and audit logging are active.
+            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
           </p>
         </div>
       )}
@@ -268,7 +270,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <span className="stat-label">Mode</span>
             <span className="stat-value">
               {token.pass_through
-                ? <span className="badge badge-amber">Full Access</span>
+                ? <span className="badge badge-amber">Pass Through</span>
                 : <span className="badge badge-blue">Scoped</span>}
             </span>
           </div>
@@ -344,7 +346,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
           </div>
           {!token.pass_through && (
             <div className="card">
-              <div className="card-header">Effective Permission Simulator</div>
+              <div className="card-header">Effective Permission Emulator</div>
               <PermissionSimulator
                 tokenId={tokenId}
                 externalEntityId={selectedEntityId || undefined}
@@ -367,13 +369,13 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
         <div>
           {token.pass_through ? (
             <div className="card">
-              <div className="card-header">Entity Permissions</div>
+              <div className="card-header">Permissions Tree</div>
               <PassThroughNotice token={token} onUpdate={setToken} />
             </div>
           ) : (
             <div className="card">
               <div className="card-header">
-                <span>Entity Permissions</span>
+                <span>Permissions Tree</span>
                 <div style={{ display: "flex", gap: 6 }}>
                   {entityTree && (
                     <button className="btn btn-text btn-sm" onClick={() => setShowAreaPicker(true)}>
@@ -397,6 +399,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                   setPermissionsVersion((v) => v + 1);
                 }}
                 onEntityClick={setSelectedEntityId}
+                collapseKey={collapseTreeKey}
               />
             </div>
           )}
