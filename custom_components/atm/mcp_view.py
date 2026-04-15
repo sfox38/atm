@@ -107,6 +107,37 @@ def _write_automations_yaml(path: str, data: list) -> None:
     _write_utf8_file_atomic(path, contents)
 
 
+def _validate_integer_range(param_name: str, value: Any, min_val: int, max_val: int | None = None) -> str | None:
+    """Validate an integer parameter is within range. Returns error message if invalid, None if valid."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return f"Input validation error: '{value}' is not of type 'integer'"
+    if value < min_val:
+        return f"Input validation error: {value} is less than the minimum of {min_val}"
+    if max_val is not None and value > max_val:
+        return f"Input validation error: {value} is greater than the maximum of {max_val}"
+    return None
+
+
+def _validate_number_range(param_name: str, value: Any, min_val: float | None = None, max_val: float | None = None) -> str | None:
+    """Validate a number parameter (int or float) is within range. Returns error message if invalid, None if valid."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return f"Input validation error: '{value}' is not of type 'number'"
+    if min_val is not None and value < min_val:
+        return f"Input validation error: {value} is less than the minimum of {min_val}"
+    if max_val is not None and value > max_val:
+        return f"Input validation error: {value} is greater than the maximum of {max_val}"
+    return None
+
+
+def _validate_string_enum(param_name: str, value: Any, allowed: list[str]) -> str | None:
+    """Validate a string is one of the allowed enum values. Returns error message if invalid, None if valid."""
+    if not isinstance(value, str):
+        return f"Input validation error: '{value}' is not of type 'string'"
+    if value not in allowed:
+        return f"Input validation error: '{value}' is not one of {allowed}"
+    return None
+
+
 def _get_script_lock(hass: Any) -> asyncio.Lock:
     if _SCRIPT_LOCK_KEY not in hass.data:
         hass.data[_SCRIPT_LOCK_KEY] = asyncio.Lock()
@@ -1621,6 +1652,15 @@ async def _tool_hass_turn_off(
 async def _tool_hass_light_set(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "brightness" in args and args["brightness"] is not None:
+        error = _validate_integer_range("brightness", args["brightness"], 0, 100)
+        if error:
+            return _tool_error(error), "", ""
+    if "temperature" in args and args["temperature"] is not None:
+        error = _validate_integer_range("temperature", args["temperature"], 0, None)
+        if error:
+            return _tool_error(error), "", ""
+
     domains = args.get("domain") or ["light"]
     entities = resolve_intent_entities(
         hass, token,
@@ -1642,6 +1682,11 @@ async def _tool_hass_light_set(
 async def _tool_hass_fan_set_speed(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "percentage" in args and args["percentage"] is not None:
+        error = _validate_integer_range("percentage", args["percentage"], 0, 100)
+        if error:
+            return _tool_error(error), "", ""
+
     entities = resolve_intent_entities(
         hass, token,
         domains=["fan"],
@@ -1658,6 +1703,11 @@ async def _tool_hass_fan_set_speed(
 async def _tool_hass_climate_set_temperature(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "temperature" in args and args["temperature"] is not None:
+        error = _validate_number_range("temperature", args["temperature"], None, None)
+        if error:
+            return _tool_error(error), "", ""
+
     entities = resolve_intent_entities(
         hass, token,
         domains=["climate"],
@@ -1674,6 +1724,11 @@ async def _tool_hass_climate_set_temperature(
 async def _tool_hass_set_position(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "position" in args and args["position"] is not None:
+        error = _validate_integer_range("position", args["position"], 0, 100)
+        if error:
+            return _tool_error(error), "", ""
+
     entities = resolve_intent_entities(
         hass, token,
         domains=args.get("domain") or ["cover"],
@@ -1691,6 +1746,11 @@ async def _tool_hass_set_position(
 async def _tool_hass_set_volume(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "volume_level" in args and args["volume_level"] is not None:
+        error = _validate_integer_range("volume_level", args["volume_level"], 0, 100)
+        if error:
+            return _tool_error(error), "", ""
+
     entities = resolve_intent_entities(
         hass, token,
         domains=["media_player"],
@@ -1708,6 +1768,19 @@ async def _tool_hass_set_volume(
 async def _tool_hass_set_volume_relative(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if "volume_step" in args and args["volume_step"] is not None:
+        step = args["volume_step"]
+        if isinstance(step, str):
+            error = _validate_string_enum("volume_step", step, ["up", "down"])
+            if error:
+                return _tool_error(error), "", ""
+        elif isinstance(step, int):
+            error = _validate_integer_range("volume_step", step, -100, 100)
+            if error:
+                return _tool_error(error), "", ""
+        else:
+            return _tool_error(f"Input validation error: '{step}' is not of type 'string' or 'integer'"), "", ""
+
     entities = resolve_intent_entities(
         hass, token,
         domains=["media_player"],
