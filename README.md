@@ -1,8 +1,8 @@
 # Advanced Token Management (ATM)
 
-Why give your AI agent basically unrestricted access to your home? ATM is a drop-in replacement for Home Assistant's native MCP server - security focused, ATM implements all 20 native HA MCP tools so your existing AI client setup works without changes. 
+Why give your AI agent basically unrestricted access to your home? ATM is a drop-in replacement for Home Assistant's native MCP server. Security focused, ATM implements all 20 native HA MCP tools so your existing AI client setup works without changes. 
 
-The difference is control: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
+The big difference is control and security: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
 
 ATM runs entirely inside Home Assistant. No extra process, no cloud dependency, no configuration beyond the ATM panel.
 
@@ -12,7 +12,7 @@ ATM runs entirely inside Home Assistant. No extra process, no cloud dependency, 
 
 | | LLAT + native MCP | ATM token |
 |---|---|---|
-| MCP tool compatibility | 20 native tools | Same 20 tools, identical names and responses; plus xx additional tools |
+| MCP tool compatibility | 20 native tools | Same 20 tools, identical names and responses; plus 16 additional tools |
 | MCP Prompts and Resources | Native HA behavior | Identical for pass-through tokens; permission-scoped for scoped tokens |
 | Client reconfiguration needed | /api/mcp | /api/atm/mcp (URL change only) |
 | Entity filtering | Binary: expose/hide, same for all clients | Four permission states, per token |
@@ -35,6 +35,8 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 - [Installation](#installation)
 - [Connecting Claude Code via MCP](#connecting-claude-code-via-mcp)
 - [Available MCP Tools](#available-mcp-tools)
+- [Tools Reference](#tools-reference)
+- [Using Third-Party MCP Servers](#using-third-party-mcp-servers)
 
 **Reference**
 - [The Permissions Panel](#the-permissions-panel) 
@@ -144,7 +146,7 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `HassCancelAllTimers` | Cancel all timers in an area |
 | `HassStopMoving` | Stop a moving cover or device |
 
-**ATM entity tools** - direct entity access filtered by the Permissions Tree:
+**ATM entity tools** - direct entity access also filtered by the Permissions Tree:
 
 | Tool | Description |
 |---|---|
@@ -569,7 +571,7 @@ Send an announcement through Assist satellite devices. Requires `allow_broadcast
 
 Third-party MCP servers such as ha-mcp run as standalone processes and make calls directly to HA's native REST API (`/api/`). HA's authentication middleware only accepts Long-Lived Access Tokens - it has no knowledge of ATM tokens. As a result, ATM tokens cannot be used as a drop-in replacement for a LLAT with these servers.
 
-If you want scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your Permissions Tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
+If you need scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your Permissions Tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
 
 ---
 
@@ -947,5 +949,3 @@ GET        /api/atm/mcp/context                               Token context summ
 ## Issues and Feedback
 
 Report issues at https://github.com/sfox38/atm/issues.
-
-
