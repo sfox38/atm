@@ -99,6 +99,7 @@ class TokenRecord:
     last_used_at: datetime | None = None
     updated_at: datetime | None = None
     pass_through: bool = False
+    use_assist_exposure: bool = False
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
     allow_automation_write: bool = False
@@ -123,6 +124,7 @@ class TokenRecord:
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "pass_through": self.pass_through,
+            **({"use_assist_exposure": self.use_assist_exposure} if self.pass_through else {}),
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
             "allow_automation_write": self.allow_automation_write,
@@ -140,6 +142,7 @@ class TokenRecord:
     def to_storage_dict(self) -> dict:
         d = self.to_dict()
         d["token_hash"] = self.token_hash
+        d["use_assist_exposure"] = self.use_assist_exposure
         return d
 
     @classmethod
@@ -154,6 +157,7 @@ class TokenRecord:
             revoked=data.get("revoked", False),
             last_used_at=_parse_dt(data.get("last_used_at")),
             pass_through=data.get("pass_through", False),
+            use_assist_exposure=data.get("use_assist_exposure", False),
             rate_limit_requests=data.get("rate_limit_requests", DEFAULT_RATE_LIMIT_REQUESTS),
             rate_limit_burst=data.get("rate_limit_burst", DEFAULT_RATE_LIMIT_BURST),
             allow_automation_write=data.get("allow_automation_write", False),
@@ -438,6 +442,7 @@ class TokenStore:
             return None
         mutable_fields = {
             "pass_through",
+            "use_assist_exposure",
             "rate_limit_requests",
             "rate_limit_burst",
             "allow_automation_write",

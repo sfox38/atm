@@ -15,7 +15,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, TOKEN_NAME_REGEX
+from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
@@ -284,7 +284,7 @@ class ATMAdminInfoView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
-        return _ok({"version": ATM_VERSION}, request_id=request["atm_rid"])
+        return _ok({"version": ATM_VERSION, "min_ha_version": MIN_HA_VERSION}, request_id=request["atm_rid"])
 
 
 class ATMAdminArchivedTokensView(HomeAssistantView):
@@ -453,11 +453,15 @@ class ATMAdminTokenView(HomeAssistantView):
 
             patchable = {
                 k: v for k, v in body.items()
-                if k in ("pass_through", "rate_limit_requests", "rate_limit_burst",
+                if k in ("pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
                          "allow_automation_write", "allow_script_write", "allow_config_read",
                          "allow_template_render", "allow_restart", "allow_physical_control",
                          "allow_service_response", "allow_broadcast", "allow_log_read")
             }
+            if "use_assist_exposure" in patchable:
+                resulting_pass_through = bool(patchable.get("pass_through", token.pass_through))
+                if not resulting_pass_through:
+                    patchable.pop("use_assist_exposure")
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
                     try:
@@ -469,7 +473,7 @@ class ATMAdminTokenView(HomeAssistantView):
             updated = await data.store.async_patch_token(token_id, **patchable)
 
         _TOOLS_LIST_FLAGS = {
-            "pass_through", "allow_automation_write", "allow_script_write",
+            "pass_through", "use_assist_exposure", "allow_automation_write", "allow_script_write",
             "allow_config_read", "allow_template_render", "allow_restart",
             "allow_physical_control", "allow_broadcast", "allow_log_read",
         }

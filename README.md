@@ -31,7 +31,6 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 - [Installation](#installation)
 - [Connecting Claude Code via MCP](#connecting-claude-code-via-mcp)
 - [Available MCP Tools](#available-mcp-tools)
-- [Using Third-Party MCP Servers](#using-third-party-mcp-servers)
 
 **Reference**
 - [The Permissions Panel](#the-permissions-panel) - tree, Select by Area, Permission Summary, Effective Permission Simulator
@@ -120,7 +119,7 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 
 ## Available MCP Tools
 
-ATM is a drop-in replacement for the native HA MCP server. It exposes all 20 native HA MCP tools plus ATM-specific tools for direct entity access and system operations. All tools are scoped to the token's permission tree.
+ATM implements all 20 native HA MCP tools using the same tool names and response formats, and exposes the same MCP Prompts and Resources as the native HA MCP server. It also adds ATM-specific tools for direct entity access and system operations. All tools, prompts, and resources are scoped to the token's permission tree.
 
 **Native HA MCP tools** - functionally identical to the native HA MCP server:
 
@@ -172,10 +171,9 @@ Claude can only see and act on entities within the token's permission scope. Nat
 
 ## Using Third-Party MCP Servers
 
-If you use a third-party MCP server for Home Assistant such as ha-mcp, you can point it at ATM using a pass-through token instead of a LLAT. You get the same full entity access, but with rate limiting, audit logging, revocation, and sensitive attribute scrubbing applied automatically.
+Third-party MCP servers such as ha-mcp run as standalone processes and make calls directly to HA's native REST API (`/api/`). HA's authentication middleware only accepts Long-Lived Access Tokens - it has no knowledge of ATM tokens. As a result, ATM tokens cannot be used as a drop-in replacement for a LLAT with these servers.
 
-> [!NOTE]
-> See [EXTERNAL_MCP_SERVERS.md](EXTERNAL_MCP_SERVERS.md) for setup instructions for specific third-party servers.
+If you want scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your permission tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
 
 ---
 
@@ -330,7 +328,7 @@ In practice, a token with a narrow entity scope but `allow_automation_write` ena
 
 ## Pass-Through Mode
 
-Pass-through tokens bypass the three-level permission check and have 🟢 GREEN access to all entities. They are intended for trusted tools where managing a full permission tree is impractical, or for routing a third-party MCP server through ATM to add rate limiting and audit logging without restricting access.
+Pass-through tokens bypass the three-level permission check and have 🟢 GREEN access to all entities. They are intended for trusted tools where managing a full permission tree is impractical.
 
 Pass-through does NOT bypass:
 

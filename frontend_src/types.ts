@@ -24,6 +24,7 @@ export interface TokenRecord {
   last_used_at: string | null;
   updated_at: string | null;
   pass_through: boolean;
+  use_assist_exposure?: boolean;
   rate_limit_requests: number;
   rate_limit_burst: number;
   allow_automation_write: boolean;
@@ -163,6 +164,7 @@ export interface PatchTokenBody {
   allow_physical_control?: boolean;
   allow_service_response?: boolean;
   allow_broadcast?: boolean;
+  use_assist_exposure?: boolean;
 }
 
 export interface PermissionPatchBody {

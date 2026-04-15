@@ -8,5 +8,6 @@
   "codeowners": ["@sfox38"],
   "iot_class": "calculated",
   "dependencies": ["frontend"],
-  "requirements": []
+  "requirements": [],
+  "homeassistant": "2024.5.0"
 }

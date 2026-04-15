@@ -19,9 +19,13 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [showWipe, setShowWipe] = useState(false);
   const [atmVersion, setAtmVersion] = useState<string | null>(null);
+  const [minHaVersion, setMinHaVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getInfo().then((info) => setAtmVersion(info.version)).catch(() => {});
+    api.getInfo().then((info) => {
+      setAtmVersion(info.version);
+      setMinHaVersion(info.min_ha_version);
+    }).catch(() => {});
   }, []);
 
   async function patchSetting(key: keyof GlobalSettings, value: boolean | number) {
@@ -117,8 +121,8 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
       <div className="card">
         <div className="card-header">Integration Info</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
-          <div><strong>Version:</strong> {atmVersion}</div>
-          <div><strong>Minimum HA version:</strong> 2024.1.0</div>
+          <div><strong>Version:</strong> {atmVersion ?? "..."}</div>
+          <div><strong>Minimum HA version:</strong> {minHaVersion ?? "..."}</div>
           <div>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer"
               style={{ color: "var(--primary-color, #03a9f4)" }}>

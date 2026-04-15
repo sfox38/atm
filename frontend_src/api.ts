@@ -108,7 +108,7 @@ export const api = {
   getAudit: (params?: AuditQueryParams) =>
     req<AuditEntry[]>("GET", `/audit${buildQuery(params)}`),
 
-  getInfo: () => req<{ version: string }>("GET", "/info"),
+  getInfo: () => req<{ version: string; min_ha_version: string }>("GET", "/info"),
 
   getSettings: () => req<GlobalSettings>("GET", "/settings"),
   patchSettings: (body: Partial<GlobalSettings>) =>

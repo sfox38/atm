@@ -4,6 +4,7 @@ import datetime
 import re
 
 ATM_VERSION = "0.9.0"
+MIN_HA_VERSION = "2024.5.0"
 DOMAIN = "atm"
 STORAGE_KEY = "atm"
 STORAGE_VERSION = 1

@@ -1389,6 +1389,11 @@ def _yaml_scalar(value: Any) -> str:
         return f"'{s}'"
     except ValueError:
         pass
+    try:
+        float(s)
+        return f"'{s}'"
+    except ValueError:
+        pass
     if _DATE_PREFIX_RE.match(s):
         return f"'{s}'"
     return s
@@ -1403,14 +1408,24 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
 
     states = hass.states.async_all()
     if token.pass_through:
-        accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            accessible = [
+                s for s in states
+                if _should_expose(hass, "conversation", s.entity_id)
+                and s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+            ]
+        else:
+            accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
     else:
         accessible = [
             s for s in states
             if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
         ]
 
-    accessible.sort(key=lambda s: (s.attributes.get("friendly_name") or s.entity_id).lower())
+    accessible.sort(key=lambda s: s.attributes.get("friendly_name") or s.entity_id)
 
     lines = ["Live Context: An overview of the areas and the devices in this smart home:"]
     for state in accessible:
@@ -1681,6 +1696,7 @@ async def _tool_hass_media_pause(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaPause", "media_player", "media_pause", {}, entities, hass, args=args)
 
 
@@ -1695,6 +1711,7 @@ async def _tool_hass_media_unpause(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "paused"]
     return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, args=args)
 
 
@@ -1709,6 +1726,7 @@ async def _tool_hass_media_next(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaNext", "media_player", "media_next_track", {}, entities, hass, args=args)
 
 
@@ -1723,6 +1741,7 @@ async def _tool_hass_media_previous(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
     return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
 
 
@@ -1781,7 +1800,24 @@ async def _tool_hass_cancel_all_timers(
         domains=["timer"],
         area=args.get("area"),
     )
-    return await _tool_intent_action("HassCancelAllTimers", "timer", "cancel", {}, entities, hass, args=args)
+    canceled = len(entities)
+    if entities:
+        try:
+            async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
+                await hass.services.async_call(
+                    "timer", "cancel", {"entity_id": entities},
+                    blocking=True, return_response=False,
+                )
+        except asyncio.TimeoutError:
+            pass
+        except (ServiceNotFound, HomeAssistantError):
+            return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
+    return _tool_success(json.dumps({
+        "speech": {},
+        "response_type": "action_done",
+        "data": {"success": [], "failed": []},
+        "speech_slots": {"canceled": canceled},
+    })), "allowed", "HassCancelAllTimers"
 
 
 async def _tool_hass_stop_moving(
@@ -1934,6 +1970,20 @@ def _resolve_area_id(entry: Any, device_registry: Any) -> str | None:
         if device and device.area_id:
             return device.area_id
     return None
+
+
+async def _get_ha_assist_api(hass: Any) -> Any:
+    """Return HA's Assist LLM APIInstance, or raise if unavailable."""
+    from homeassistant.helpers import llm as _ha_llm
+    llm_context = _ha_llm.LLMContext(
+        platform=DOMAIN,
+        context=None,
+        user_prompt=None,
+        language="en",
+        assistant="conversation",
+        device_id=None,
+    )
+    return await _ha_llm.async_get_api(hass, _ha_llm.LLM_API_ASSIST, llm_context)
 
 
 def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
@@ -2105,6 +2155,7 @@ async def _dispatch_mcp(
             "capabilities": {
                 "tools": {"listChanged": True},
                 "resources": {"subscribe": False},
+                "prompts": {},
             },
             "serverInfo": {"name": "ATM", "version": ATM_VERSION},
         })
@@ -2148,11 +2199,19 @@ async def _dispatch_mcp(
 
     if method == "resources/list":
         resp = _jsonrpc_result(msg_id, {
-            "resources": [{
-                "uri": "atm://server-info",
-                "name": "ATM Server Info",
-                "mimeType": "application/json",
-            }]
+            "resources": [
+                {
+                    "uri": "homeassistant://assist/context-snapshot",
+                    "name": "Assist Context Snapshot",
+                    "description": "A snapshot of the current Assist context, matching the existing GetLiveContext tool output",
+                    "mimeType": "text/plain",
+                },
+                {
+                    "uri": "atm://server-info",
+                    "name": "ATM Server Info",
+                    "mimeType": "application/json",
+                },
+            ]
         })
         _log(data, token, request_id=request_id, method="resources/list",
              resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
@@ -2160,6 +2219,18 @@ async def _dispatch_mcp(
 
     if method == "resources/read":
         uri = params.get("uri", "")
+        if uri == "homeassistant://assist/context-snapshot":
+            context_text = _build_live_context(token, hass)
+            resp = _jsonrpc_result(msg_id, {
+                "contents": [{
+                    "uri": "homeassistant://assist/context-snapshot",
+                    "mimeType": "text/plain",
+                    "text": context_text,
+                }]
+            })
+            _log(data, token, request_id=request_id, method="resources/read",
+                 resource="homeassistant://assist/context-snapshot", outcome="allowed", client_ip=client_ip)
+            return resp, "resources/read", "homeassistant://assist/context-snapshot", "allowed"
         if uri != "atm://server-info":
             if msg_id is not None:
                 _log(data, token, request_id=request_id, method="resources/read",
@@ -2177,6 +2248,56 @@ async def _dispatch_mcp(
         _log(data, token, request_id=request_id, method="resources/read",
              resource="atm://server-info", outcome="allowed", client_ip=client_ip)
         return resp, "resources/read", "atm://server-info", "allowed"
+
+    if method == "prompts/list":
+        if token.pass_through:
+            try:
+                api_inst = await _get_ha_assist_api(hass)
+                prompt_name = f"Default prompt for Home Assistant {api_inst.api.name}"
+                prompts = [{"name": prompt_name, "description": f"Default prompt for Home Assistant {api_inst.api.name} API"}]
+            except Exception:
+                prompts = []
+        else:
+            prompts = [{
+                "name": "ATM access context",
+                "description": "Describes the Home Assistant entities and capabilities accessible to this token",
+            }]
+        resp = _jsonrpc_result(msg_id, {"prompts": prompts})
+        _log(data, token, request_id=request_id, method="prompts/list",
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
+        return resp, "prompts/list", "/api/atm/mcp", "allowed"
+
+    if method == "prompts/get":
+        name = params.get("name", "")
+        if token.pass_through:
+            try:
+                api_inst = await _get_ha_assist_api(hass)
+                expected_name = f"Default prompt for Home Assistant {api_inst.api.name}"
+                if name != expected_name:
+                    _log(data, token, request_id=request_id, method="prompts/get",
+                         resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                    return _jsonrpc_error(msg_id, -32602, "Unknown prompt."), "prompts/get", "/api/atm/mcp", "denied"
+                resp = _jsonrpc_result(msg_id, {
+                    "description": f"Default prompt for Home Assistant {api_inst.api.name} API",
+                    "messages": [{"role": "assistant", "content": {"type": "text", "text": api_inst.api_prompt}}],
+                })
+            except Exception:
+                _log(data, token, request_id=request_id, method="prompts/get",
+                     resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                return _jsonrpc_error(msg_id, -32603, "Prompt unavailable."), "prompts/get", "/api/atm/mcp", "denied"
+        else:
+            if name != "ATM access context":
+                _log(data, token, request_id=request_id, method="prompts/get",
+                     resource="/api/atm/mcp", outcome="denied", client_ip=client_ip)
+                return _jsonrpc_error(msg_id, -32602, "Unknown prompt."), "prompts/get", "/api/atm/mcp", "denied"
+            prompt_text = _build_context_plain(token, hass)
+            resp = _jsonrpc_result(msg_id, {
+                "description": "Describes the Home Assistant entities and capabilities accessible to this token",
+                "messages": [{"role": "assistant", "content": {"type": "text", "text": prompt_text}}],
+            })
+        _log(data, token, request_id=request_id, method="prompts/get",
+             resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
+        return resp, "prompts/get", "/api/atm/mcp", "allowed"
 
     if msg_id is not None:
         _log(data, token, request_id=request_id, method=method or "unknown",

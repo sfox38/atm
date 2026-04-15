@@ -8,10 +8,11 @@ interface Props {
 }
 
 interface FlagDef {
-  key: keyof Pick<TokenRecord, "allow_restart" | "allow_physical_control" | "allow_automation_write" | "allow_script_write" | "allow_log_read" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
+  key: keyof Pick<TokenRecord, "allow_restart" | "allow_physical_control" | "allow_automation_write" | "allow_script_write" | "allow_log_read" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast" | "use_assist_exposure">;
   label: string;
   description: string;
   alwaysShown?: boolean;
+  passThoughOnly?: boolean;
   danger?: boolean;
   confirmWarning?: string;
   confirmAck?: string;
@@ -74,6 +75,13 @@ const FLAGS: FlagDef[] = [
     label: "Allow broadcast",
     description: "Permits the HassBroadcast tool to announce messages through assist satellite devices.",
   },
+  {
+    key: "use_assist_exposure",
+    label: "Use HA Assist entity scope",
+    description: "Limits entity access to entities exposed in HA's Assist settings, matching native HA MCP server behaviour. Applies to Full Access tokens only.",
+    passThoughOnly: true,
+    alwaysShown: true,
+  },
 ];
 
 export function CapabilityFlags({ token, onUpdate }: Props) {
@@ -97,7 +105,7 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
   }
 
   function handleToggle(flag: FlagDef, currentValue: boolean) {
-    if (token.pass_through && !flag.alwaysShown) return;
+    if (token.pass_through && !flag.alwaysShown && !flag.passThoughOnly) return;
     if (!currentValue && flag.confirmWarning) {
       setPendingKey(flag.key);
       setAckChecked(false);
@@ -156,25 +164,22 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
       )}
 
       {FLAGS.map((flag) => {
-        const { key, label, description, alwaysShown, danger } = flag;
-        const greyedOut = token.pass_through && !alwaysShown;
-        const value = token[key] as boolean;
+        const { key, label, description, alwaysShown, passThoughOnly, danger } = flag;
+        if (passThoughOnly && !token.pass_through) return null;
+        const greyedOut = token.pass_through && !alwaysShown && !passThoughOnly;
+        if (greyedOut) return null;
+        const value = (token[key] ?? false) as boolean;
         return (
-          <div
-            key={key}
-            className="toggle-row"
-            style={{ opacity: greyedOut ? 0.5 : 1 }}
-            title={greyedOut ? "Not evaluated in pass-through mode" : undefined}
-          >
+          <div key={key} className="toggle-row">
             <div className="toggle-label">
               <span style={danger ? { color: "var(--warning-color, #ff9800)" } : undefined}>{label}</span>
               <small>{description}</small>
             </div>
-            <label style={{ display: "flex", alignItems: "center", cursor: greyedOut ? "not-allowed" : "pointer" }}>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
               <input
                 type="checkbox"
                 checked={value}
-                disabled={saving === key || greyedOut}
+                disabled={saving === key}
                 onChange={() => handleToggle(flag, value)}
                 style={{ width: 18, height: 18, accentColor: danger ? "var(--warning-color, #ff9800)" : "var(--primary-color, #03a9f4)", cursor: "inherit" }}
               />

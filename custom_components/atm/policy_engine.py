@@ -394,80 +394,51 @@ def resolve_intent_entities(
 ) -> list[str]:
     """Resolve intent-based targeting (area/name/floor/domain/device_class) to entity_id list.
 
-    Silently drops entities the token cannot WRITE. Never acknowledges blocked or
-    inaccessible entities. Returns an empty list when nothing matches.
+    Uses HA's async_match_targets for name/area/floor resolution to match native HA
+    intent scoring behavior. Silently drops entities the token cannot WRITE. Never
+    acknowledges blocked or inaccessible entities. Returns an empty list when nothing matches.
     """
-    er_inst = er.async_get(hass)
-    ar_inst = ar.async_get(hass)
-    dr_inst = dr.async_get(hass)
+    from homeassistant.helpers.intent import (  # noqa: PLC0415
+        MatchTargetsConstraints,
+        async_match_targets,
+    )
 
-    states = list(hass.states.async_all())
+    all_states = list(hass.states.async_all())
 
-    if domains:
-        domain_set = set(domains)
-        states = [s for s in states if s.entity_id.split(".")[0] in domain_set]
+    if token.pass_through and token.use_assist_exposure:
+        from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+            async_should_expose as _should_expose,
+        )
+        all_states = [s for s in all_states if _should_expose(hass, "conversation", s.entity_id)]
 
-    if device_classes:
-        dc_set = set(device_classes)
-        states = [s for s in states if s.attributes.get("device_class") in dc_set]
+    permitted: list[State] = [
+        s for s in all_states
+        if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+        and (token.pass_through or resolve(s.entity_id, token, hass) == Permission.WRITE)
+    ]
 
-    if floor:
-        floor_lower = floor.lower()
-        floor_area_ids: set[str] = set()
-        for a in ar_inst.async_list_areas():
-            fid = getattr(a, "floor_id", None)
-            if fid and fid.lower() == floor_lower:
-                floor_area_ids.add(a.id)
-        if not floor_area_ids:
-            return []
-        floor_entity_ids: set[str] = set()
-        for entry in er_inst.entities.values():
-            if entry.disabled_by:
-                continue
-            if entry.area_id in floor_area_ids:
-                floor_entity_ids.add(entry.entity_id)
-            elif entry.device_id:
-                device = dr_inst.async_get(entry.device_id)
-                if device and device.area_id in floor_area_ids:
-                    floor_entity_ids.add(entry.entity_id)
-        states = [s for s in states if s.entity_id in floor_entity_ids]
+    if not name and not area and not floor:
+        if domains:
+            domain_set = set(domains)
+            permitted = [s for s in permitted if s.entity_id.split(".")[0] in domain_set]
+        if device_classes:
+            dc_set = set(device_classes)
+            permitted = [s for s in permitted if s.attributes.get("device_class") in dc_set]
+        return [s.entity_id for s in permitted]
 
-    if area:
-        area_lower = area.lower()
-        target_area = None
-        for a in ar_inst.async_list_areas():
-            if a.id == area or a.name.lower() == area_lower:
-                target_area = a
-                break
-        if target_area is None:
-            return []
-        area_entity_ids: set[str] = set()
-        for entry in er_inst.entities.values():
-            if entry.disabled_by:
-                continue
-            if entry.area_id == target_area.id:
-                area_entity_ids.add(entry.entity_id)
-            elif entry.device_id:
-                device = dr_inst.async_get(entry.device_id)
-                if device and device.area_id == target_area.id:
-                    area_entity_ids.add(entry.entity_id)
-        states = [s for s in states if s.entity_id in area_entity_ids]
-
-    if name:
-        name_lower = name.lower()
-        states = [
-            s for s in states
-            if name_lower in s.attributes.get("friendly_name", "").lower()
-        ]
-
-    result: list[str] = []
-    for s in states:
-        eid = s.entity_id
-        if eid.split(".")[0] in BLOCKED_DOMAINS:
-            continue
-        if token.pass_through:
-            result.append(eid)
-        elif resolve(eid, token, hass) == Permission.WRITE:
-            result.append(eid)
-
-    return result
+    constraints = MatchTargetsConstraints(
+        name=name,
+        area_name=area,
+        floor_name=floor,
+        domains=domains,
+        device_classes=device_classes,
+        assistant=None,
+    )
+    result = async_match_targets(
+        hass,
+        constraints,
+        states=permitted,
+    )
+    if not result.is_match:
+        return []
+    return [s.entity_id for s in result.states]
