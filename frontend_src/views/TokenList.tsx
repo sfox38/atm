@@ -110,7 +110,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
         ) : error ? (
           <ErrorMsg msg={error} />
         ) : (
-          <table className="data-table">
+          <table className="data-table token-table">
             <thead>
               <tr>
                 <th>Name</th>

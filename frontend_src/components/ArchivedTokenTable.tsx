@@ -38,7 +38,7 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
   return (
     <div>
       {error && <div className="banner banner-error" style={{ marginBottom: 8 }}>{error}</div>}
-      <table className="data-table">
+      <table className="data-table archived-table">
         <thead>
           <tr>
             <th>Name</th>

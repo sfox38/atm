@@ -1,8 +1,8 @@
 # Advanced Token Management (ATM)
 
-Home Assistant's built-in Long-Lived Access Tokens give any holder broad access to your HA instance - there is no built-in way to say "this client can see the living room lights but not the locks." ATM fixes that. It issues its own scoped tokens, each with its own permission rules, rate limit, optional expiry, and a full audit trail. Your AI assistant gets exactly the access you decide, and nothing more. If a token is compromised, one click revokes it and terminates all open connections immediately.
+Home Assistant's native MCP server gives every connected AI client the same unrestricted access to your home. ATM is a drop-in replacement - it implements all 20 native HA MCP tools with identical names and response formats, so your existing AI client setup works without changes. The difference is control: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
 
-ATM runs entirely inside Home Assistant's own web server. No separate process, no outbound connections, no cloud dependency.
+ATM runs entirely inside Home Assistant's web server. No extra process, no cloud dependency, no configuration beyond the ATM panel.
 
 ---
 
@@ -10,6 +10,9 @@ ATM runs entirely inside Home Assistant's own web server. No separate process, n
 
 | | LLAT + native MCP | ATM token |
 |---|---|---|
+| MCP tool compatibility | 20 native tools | Same 20 tools, identical names and responses |
+| MCP Prompts and Resources | Native HA behavior | Identical for pass-through tokens; permission-scoped for scoped tokens |
+| Client reconfiguration needed | - | URL change only |
 | Entity filtering | Binary expose/hide, same for all clients | Four permission states, per token |
 | Per-client control | No - all clients see the same exposed entities | Yes - each token has independent permissions |
 | Read-only access | No | Yes - YELLOW state allows reads, blocks writes |
@@ -18,7 +21,6 @@ ATM runs entirely inside Home Assistant's own web server. No separate process, n
 | Expiry | None | Optional, auto-archived on expiry |
 | Revocation | Revoke LLAT via HA profile page | Instant, terminates open connections immediately |
 | Sensitive attribute scrubbing | None | Always applied |
-| MCP endpoint | Built into HA | Built into ATM, with scoped access |
 
 If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI tool to your Home Assistant, ATM gives you control that the native system cannot provide.
 
@@ -49,7 +51,7 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 
 ## Requirements
 
-- Home Assistant 2024.1 or later
+- Home Assistant 2024.5 or later
 - Python 3.11 or later (bundled with HA)
 - No additional Python packages required
 
@@ -76,6 +78,9 @@ After installation, go to **Settings > Devices and services > Add integration** 
 
 > [!NOTE]
 > Once installed, open the **ATM** panel in your Home Assistant sidebar to manage your tokens.
+
+> [!TIP]
+> **Migrating from the native HA MCP server?** ATM replaces it entirely. Once you have created a token and updated your AI client's MCP URL to point at `/api/atm/mcp`, you can disable or remove the native HA MCP integration from **Settings > Devices and services**. Your AI client configuration needs only a URL change - the tool names and parameters are identical.
 
 ---
 
@@ -119,7 +124,7 @@ Start a new Claude Code session and run `/mcp`. The `home-assistant` server shou
 
 ## Available MCP Tools
 
-ATM implements all 20 native HA MCP tools using the same tool names and response formats, and exposes the same MCP Prompts and Resources as the native HA MCP server. It also adds ATM-specific tools for direct entity access and system operations. All tools, prompts, and resources are scoped to the token's permission tree.
+ATM implements all 20 native HA MCP tools using the same tool names and response formats, and exposes the same MCP Prompts and Resources as the native HA MCP server. It also adds ATM-specific tools for direct entity access and system operations. All tools, prompts, and resources are scoped to the token's permission tree. Pass-through tokens receive the same prompt and resource content as the native HA MCP server.
 
 **Native HA MCP tools** - functionally identical to the native HA MCP server:
 
@@ -161,6 +166,19 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
 | `create_automation` / `edit_automation` / `delete_automation` | `allow_automation_write` |
 | `create_script` / `edit_script` / `delete_script` | `allow_script_write` |
+
+**MCP Prompts** - same prompt protocol as the native HA MCP server:
+
+| Prompt | Description |
+|---|---|
+| `Default prompt for Home Assistant {name}` | HA instance system prompt. Pass-through tokens receive the same prompt as the native HA MCP server. Scoped tokens receive a permission-filtered version. |
+
+**MCP Resources** - readable via `resources/read`:
+
+| URI | Description |
+|---|---|
+| `homeassistant://assist/context-snapshot` | Current entity state snapshot. Same URI as the native HA MCP server; content is scoped to the token's permissions. |
+| `atm://server-info` | ATM server metadata, token info, and version. JSON format. |
 
 Claude can only see and act on entities within the token's permission scope. Native tools silently skip inaccessible entities without revealing they exist.
 
