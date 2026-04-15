@@ -232,6 +232,7 @@ function DeviceGroup({
     try {
       const tree = await api.patchDevicePermission(tokenId, deviceId, { state: newState });
       onPermChange(tree);
+      if (entityIds[0]) onEntityClick?.(entityIds[0]);
     } catch {
       // ignore
     }
@@ -326,6 +327,9 @@ function DomainGroup({
     try {
       const tree = await api.patchDomainPermission(tokenId, domainKey, { state: newState });
       onPermChange(tree);
+      const firstEntity = domainData.deviceless_entities[0]
+        ?? Object.values(domainData.devices)[0]?.entities[0];
+      if (firstEntity) onEntityClick?.(firstEntity);
     } catch {
       // ignore
     }

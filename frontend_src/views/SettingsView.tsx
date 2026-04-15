@@ -6,6 +6,7 @@ import { NotificationSettings } from "../components/NotificationSettings";
 import { KillSwitch } from "../components/KillSwitch";
 import { WipeConfirmModal } from "../components/WipeConfirmModal";
 import { Loading } from "../index";
+import { JS_BUILD } from "../version";
 
 const GITHUB_URL = "https://github.com/sfox38/atm";
 
@@ -156,6 +157,10 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
           onClose={() => setShowWipe(false)}
         />
       )}
+
+      <div style={{ textAlign: "right", fontSize: 11, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 8, opacity: 0.6 }}>
+        js build {JS_BUILD}
+      </div>
     </div>
   );
 }
