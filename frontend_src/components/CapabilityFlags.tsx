@@ -8,7 +8,7 @@ interface Props {
 }
 
 interface FlagDef {
-  key: keyof Pick<TokenRecord, "allow_restart" | "allow_automation_write" | "allow_script_write" | "allow_log_read" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
+  key: keyof Pick<TokenRecord, "allow_restart" | "allow_physical_control" | "allow_automation_write" | "allow_script_write" | "allow_log_read" | "allow_config_read" | "allow_template_render" | "allow_service_response" | "allow_broadcast">;
   label: string;
   description: string;
   alwaysShown?: boolean;
@@ -21,29 +21,37 @@ const FLAGS: FlagDef[] = [
   {
     key: "allow_restart",
     label: "Allow HA restart/stop",
-    description: "Permits homeassistant.restart and homeassistant.stop service calls. Evaluated even in pass-through mode.",
+    description: "Permits the homeassistant.restart and homeassistant.stop service calls.",
     alwaysShown: true,
+  },
+  {
+    key: "allow_physical_control",
+    label: "Allow physical control",
+    description: "Permits lock, alarm, and cover mutation services (e.g. lock.unlock, alarm_control_panel.alarm_disarm, cover.open_cover).",
+    alwaysShown: true,
+    confirmWarning: "A client with this flag enabled can lock and unlock doors, arm and disarm alarms, and open and close covers. Only enable this for clients you fully trust.",
+    confirmAck: "I understand this token will be able to control locks, alarms, and covers",
   },
   {
     key: "allow_automation_write",
     label: "Allow automation write",
-    description: "Permits creating, editing, and deleting automations via MCP. Automation payloads are not validated against this token's entity scope - enable only for trusted clients.",
+    description: "Permits creating, editing, and deleting automations via MCP. A client with this flag can reference any entity in Home Assistant, not just those in this token's scope.",
     alwaysShown: true,
-    confirmWarning: "Automation payloads are not validated against this token's entity scope. A client with this flag enabled can create automations that control any entity in Home Assistant, regardless of what this token is permitted to access directly. This effectively grants broader system access than the token's entity permissions suggest.",
+    confirmWarning: "Automation write bypasses this token's entity permissions. A client with this flag enabled can create automations that reference any entity in Home Assistant, regardless of what the token can access directly. Enable only for clients you fully control.",
     confirmAck: "I understand that automation write bypasses entity-level access controls",
   },
   {
     key: "allow_script_write",
     label: "Allow script write",
-    description: "Permits creating, editing, and deleting scripts via MCP. Script payloads are not validated against this token's entity scope - enable only for trusted clients.",
+    description: "Permits creating, editing, and deleting scripts via MCP. A client with this flag can reference any entity in Home Assistant, not just those in this token's scope.",
     alwaysShown: true,
-    confirmWarning: "Script payloads are not validated against this token's entity scope. A client with this flag enabled can create scripts that control any entity in Home Assistant, regardless of what this token is permitted to access directly.",
+    confirmWarning: "Script write bypasses this token's entity permissions. A client with this flag enabled can create scripts that reference any entity in Home Assistant, regardless of what the token can access directly. Enable only for clients you fully control.",
     confirmAck: "I understand that script write bypasses entity-level access controls",
   },
   {
     key: "allow_log_read",
     label: "Allow log read",
-    description: "Permits the get_logs tool and GET /api/atm/logs endpoint to read Home Assistant system log entries.",
+    description: "Permits reading Home Assistant system log entries. Logs may contain IP addresses and internal system details.",
     alwaysShown: true,
   },
   {

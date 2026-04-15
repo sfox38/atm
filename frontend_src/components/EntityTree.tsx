@@ -8,6 +8,10 @@ const HIGH_RISK_DOMAINS = new Set([
   "backup", "notify", "persistent_notification", "mqtt",
 ]);
 
+const INDIRECT_CONTROL_DOMAINS = new Set([
+  "automation", "script", "scene",
+]);
+
 interface Props {
   tokenId: string;
   permissions: PermissionTree;
@@ -298,6 +302,7 @@ function DomainGroup({
   const state: NodeState = domainNode?.state ?? "GREY";
   const effective = effectiveForNode("domain", domainKey, domainKey, permissions);
   const isRisk = HIGH_RISK_DOMAINS.has(domainKey);
+  const isIndirect = INDIRECT_CONTROL_DOMAINS.has(domainKey);
   const isDynamic = state !== "GREY";
 
   useEffect(() => {
@@ -341,6 +346,9 @@ function DomainGroup({
         )}
         {isRisk && (
           <span className="tree-badge tree-badge-risk" title="High-risk domain. Granting WRITE here gives access to broad system operations.">!</span>
+        )}
+        {isIndirect && (
+          <span className="tree-badge tree-badge-risk" title="WRITE access here can indirectly control entities outside this token's permission scope. Triggered automations, scripts, and scenes run under Home Assistant's full context.">!</span>
         )}
         <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
         <PermissionSelector value={state} onChange={setDomainState} />

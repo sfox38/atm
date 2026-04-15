@@ -32,6 +32,7 @@ export interface TokenRecord {
   allow_config_read: boolean;
   allow_template_render: boolean;
   allow_restart: boolean;
+  allow_physical_control: boolean;
   allow_service_response: boolean;
   allow_broadcast: boolean;
   permissions: PermissionTree;
@@ -159,6 +160,7 @@ export interface PatchTokenBody {
   allow_config_read?: boolean;
   allow_template_render?: boolean;
   allow_restart?: boolean;
+  allow_physical_control?: boolean;
   allow_service_response?: boolean;
   allow_broadcast?: boolean;
 }

@@ -186,7 +186,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       {token.pass_through && (
         <div className="pass-through-header-banner">
           <p>
-            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Full Access token.</strong> It has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, TTL, rate limiting, and audit logging are active.
+            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Full Access token.</strong> It has unrestricted access to all Home Assistant entities and services. No entity scoping or capability restrictions apply. Only revocation, expiry, rate limiting, and audit logging are active.
           </p>
         </div>
       )}
