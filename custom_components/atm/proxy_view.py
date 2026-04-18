@@ -282,7 +282,7 @@ class ATMServiceView(HomeAssistantView):
         }
 
         use_return_response = False
-        if token.allow_service_response:
+        if token.allow_service_response or token.pass_through:
             try:
                 from homeassistant.core import SupportsResponse as _SR
                 handler = hass.services.async_services().get(domain, {}).get(service)

@@ -78,7 +78,7 @@ async def _read_body(request: web.Request, request_id: str = "") -> dict | web.R
         return _err("request_too_large", "Request body too large.", 413, request_id)
 
     try:
-        body_bytes = await request.read()
+        body_bytes = await request.content.read(MAX_REQUEST_BODY_BYTES + 1)
     except Exception:
         return _err("invalid_request", "Failed to read request body.", 400, request_id)
 
@@ -479,7 +479,7 @@ class ATMAdminTokenView(HomeAssistantView):
         _TOOLS_LIST_FLAGS = {
             "pass_through", "use_assist_exposure", "allow_automation_write", "allow_script_write",
             "allow_config_read", "allow_template_render", "allow_restart",
-            "allow_physical_control", "allow_broadcast", "allow_log_read",
+            "allow_physical_control", "allow_service_response", "allow_broadcast", "allow_log_read",
         }
         if patchable.keys() & _TOOLS_LIST_FLAGS:
             notify_tools_list_changed(token_id, data.sse_connections)

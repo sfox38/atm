@@ -68,9 +68,6 @@ class ATMTokenSensor(SensorEntity):
         self._attr_unique_id = f"atm_{slug}_{sensor_type}"
         self._attr_name = sensor_type.replace("_", " ").title()
 
-        if sensor_type in self._COUNT_TYPES:
-            self._attr_state_class = SensorStateClass.MEASUREMENT
-
     @property
     def state_class(self):
         if self._sensor_type in self._COUNT_TYPES:

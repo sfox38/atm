@@ -434,6 +434,7 @@ class TokenStore:
     ) -> TokenRecord | None:
         """Update mutable capability and rate-limit fields on a token and persist.
 
+        Callers must hold self.async_lock before calling to prevent concurrent writes.
         When rate_limit_requests is set to 0, rate_limit_burst is forced to 0.
         Returns None if the token is not found.
         """

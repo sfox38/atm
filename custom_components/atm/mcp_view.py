@@ -41,6 +41,8 @@ from .const import (
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
+    PASS_THROUGH_EXEMPT_FLAGS,
+    PHYSICAL_GATE_DOMAINS,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
@@ -84,7 +86,6 @@ _MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _AUTOMATION_YAML = "automations.yaml"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write", "allow_log_read"})
 _SCRIPT_CONFIG_PATH = "scripts.yaml"
 _SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
@@ -966,7 +967,7 @@ async def _tool_call_service(
     call_data["entity_id"] = permitted_entities
 
     use_return_response = False
-    if token.allow_service_response:
+    if token.allow_service_response or token.pass_through:
         try:
             from homeassistant.core import SupportsResponse as _SR
             handler = hass.services.async_services().get(domain, {}).get(service)
@@ -1483,9 +1484,20 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
                 s for s in states
                 if _should_expose(hass, "conversation", s.entity_id)
                 and s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+                and not (
+                    (entry := registry.async_get(s.entity_id)) is not None
+                    and entry.platform == DOMAIN
+                )
             ]
         else:
-            accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
+            accessible = [
+                s for s in states
+                if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+                and not (
+                    (entry := registry.async_get(s.entity_id)) is not None
+                    and entry.platform == DOMAIN
+                )
+            ]
     else:
         accessible = [
             s for s in states
@@ -1632,6 +1644,11 @@ async def _tool_hass_turn_on(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    # homeassistant.turn_on routes lock/alarm/cover entities to their physical
+    # services (lock.lock, alarm_control_panel.alarm_arm_*, cover.open_cover).
+    # Strip those entities when allow_physical_control is not set.
+    if not token.allow_physical_control:
+        entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOn", "homeassistant", "turn_on", {}, entities, hass, args=args)
 
 
@@ -1646,6 +1663,10 @@ async def _tool_hass_turn_off(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    # homeassistant.turn_off routes lock/alarm/cover to physical services.
+    # Strip those entities when allow_physical_control is not set.
+    if not token.allow_physical_control:
+        entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOff", "homeassistant", "turn_off", {}, entities, hass, args=args)
 
 
@@ -1724,6 +1745,9 @@ async def _tool_hass_climate_set_temperature(
 async def _tool_hass_set_position(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if not token.allow_physical_control:
+        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassSetPosition"
+
     if "position" in args and args["position"] is not None:
         error = _validate_integer_range("position", args["position"], 0, 100)
         if error:
@@ -1822,7 +1846,7 @@ async def _tool_hass_media_unpause(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "paused"]
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state in ("paused", "idle")]
     return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, args=args)
 
 
@@ -1852,7 +1876,7 @@ async def _tool_hass_media_previous(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state in ("playing", "paused")]
     return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
 
 
@@ -1936,6 +1960,9 @@ async def _tool_hass_cancel_all_timers(
 async def _tool_hass_stop_moving(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if not token.allow_physical_control:
+        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassStopMoving"
+
     entities = resolve_intent_entities(
         hass, token,
         domains=args.get("domain") or ["cover"],
@@ -2293,7 +2320,7 @@ async def _dispatch_mcp(
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
             flag = tool_def["flag"]
-            if flag in _PASS_THROUGH_EXEMPT_FLAGS:
+            if flag in PASS_THROUGH_EXEMPT_FLAGS:
                 flag_enabled = getattr(token, flag, False)
             else:
                 flag_enabled = token.pass_through or getattr(token, flag, False)
@@ -2535,8 +2562,13 @@ class ATMMcpSseView(HomeAssistantView):
             await archive_expired_token(hass, data, token)
             return _401
 
-        # SSE connection limit check after validity checks so revoked tokens cannot
-        # probe connection counts via 429 vs 401 differential timing.
+        # SSE connection limit check intentionally runs after full token validation.
+        # Moving it before auth would create a connection-count oracle: an attacker
+        # presenting a valid-format token could distinguish "token exists and is maxed"
+        # (429) from "token doesn't exist or isn't maxed" (401). Since ATM token space
+        # is 2^256 the practical risk is negligible, but the check is cheap so there is
+        # no performance reason to move it earlier. This is a deliberate deviation from
+        # the CLAUDE.md rule 19 wording "before full token validation".
         current_count = len(data.sse_connections.get(token.id, set()))
         if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
             _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",

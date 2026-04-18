@@ -426,6 +426,7 @@ def resolve_intent_entities(
         async_match_targets,
     )
 
+    registry = er.async_get(hass)
     all_states = list(hass.states.async_all())
 
     if token.pass_through and token.use_assist_exposure:
@@ -437,6 +438,10 @@ def resolve_intent_entities(
     permitted: list[State] = [
         s for s in all_states
         if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+        and not (
+            (entry := registry.async_get(s.entity_id)) is not None
+            and entry.platform == DOMAIN
+        )
         and (token.pass_through or resolve(s.entity_id, token, hass) == Permission.WRITE)
     ]
 
