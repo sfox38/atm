@@ -3,7 +3,7 @@
 import datetime
 import re
 
-ATM_VERSION = "0.9.0"
+ATM_VERSION = "0.9.1"
 MIN_HA_VERSION = "2024.5.0"
 DOMAIN = "atm"
 STORAGE_KEY = "atm"
