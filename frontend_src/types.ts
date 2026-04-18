@@ -16,6 +16,9 @@ export interface PermissionTree {
 export interface TokenRecord {
   id: string;
   name: string;
+  // token_hash is declared here for type completeness but the backend never includes it
+  // in to_dict() responses (only to_storage_dict() uses it). This field will always be
+  // undefined at runtime. Do not read it; use token_hash only in TokenCreateResponse.token.
   token_hash: string;
   created_at: string;
   created_by: string;
@@ -132,6 +135,9 @@ export interface ScopeResult {
   token_name: string;
   readable: string[];
   writable: string[];
+  // Backend returns 9 flags but only 5 are declared here. Missing fields:
+  // allow_service_response, allow_physical_control, allow_broadcast, allow_log_read.
+  // Add them here if the scope view UI ever needs to display them.
   capability_flags: {
     allow_config_read: boolean;
     allow_automation_write: boolean;

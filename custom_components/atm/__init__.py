@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -18,6 +19,8 @@ from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
 
@@ -111,6 +114,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await audit.async_save()
             except asyncio.CancelledError:
                 return
+            except Exception:
+                _LOGGER.warning("Audit flush failed; will retry next interval", exc_info=True)
 
     audit_task = hass.async_create_background_task(
         _audit_flush_loop(), "atm_audit_flush_loop"

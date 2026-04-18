@@ -46,7 +46,6 @@ async function _doReq<T>(method: string, path: string, body?: unknown, retried =
 
   if (res.status === 401 && !retried && hassInstance?.auth) {
     await hassInstance.auth.refreshAccessToken();
-    setHass(hassInstance); // ensure hassInstance reflects refreshed token
     return _doReq<T>(method, path, body, true);
   }
 

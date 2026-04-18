@@ -13,6 +13,7 @@ from typing import Any
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
+from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
@@ -63,6 +64,8 @@ def require_admin(method):
         if not user or not user.is_admin:
             _LOGGER.info("Admin %s %s forbidden rid=%s", request.method, request.path, request_id)
             return _err("forbidden", "Admin access required.", 403, request_id)
+        # Logs user.id (UUID) rather than user.name. UUID is stable and non-spoofable;
+        # user.name can be changed by the admin. Intentional.
         _LOGGER.info("Admin %s %s rid=%s user=%s", request.method, request.path, request_id, user.id)
         return await method(self, request, **kwargs)
     return wrapper
@@ -463,7 +466,7 @@ class ATMAdminTokenView(HomeAssistantView):
             if "use_assist_exposure" in patchable:
                 resulting_pass_through = bool(patchable.get("pass_through", token.pass_through))
                 if not resulting_pass_through:
-                    patchable.pop("use_assist_exposure")
+                    return _err("invalid_request", "use_assist_exposure is only valid for pass_through tokens.", 400, rid)
             for rl_field in ("rate_limit_requests", "rate_limit_burst"):
                 if rl_field in patchable:
                     try:
@@ -514,10 +517,7 @@ class ATMAdminTokenView(HomeAssistantView):
             token_name = token.name
             now = utcnow()
 
-            archived = await data.store.async_archive_token(token_id, revoked=True, revoked_at=now)
-            if archived is None:
-                return _err("not_found", "Token not found.", 404, rid)
-
+            await data.store.async_archive_token(token_id, revoked=True, revoked_at=now)
             cancel_expiry_timer(data, token_id)
 
         await terminate_token_connections(token_id, data.sse_connections)
@@ -545,7 +545,10 @@ class ATMAdminTokenView(HomeAssistantView):
 
         slug = token_name_slug(token_name)
         if data.async_on_token_archived:
-            await data.async_on_token_archived(slug)
+            try:
+                await data.async_on_token_archived(slug)
+            except Exception:
+                _LOGGER.warning("Sensor removal failed for token %s; entity registry may have ghost entries", token_id, exc_info=True)
 
         return web.Response(status=204, headers={"X-ATM-Request-ID": rid})
 
@@ -754,15 +757,33 @@ class ATMAdminScopeView(HomeAssistantView):
         readable: list[str] = []
         writable: list[str] = []
 
-        for state in all_states:
-            eid = state.entity_id
-            perm = resolve(eid, token, hass)
-            if perm == Permission.WRITE:
+        if token.pass_through:
+            # Fast path: pass_through tokens have WRITE on everything except BLOCKED_DOMAINS
+            # and ATM platform entities. Avoids an O(n) resolve() call per entity.
+            registry = er_mod.async_get(hass)
+            for state in all_states:
+                eid = state.entity_id
+                if eid.split(".")[0] in BLOCKED_DOMAINS:
+                    continue
+                entry = registry.async_get(eid)
+                if entry is not None and entry.platform == DOMAIN:
+                    continue
                 readable.append(eid)
                 writable.append(eid)
-            elif perm == Permission.READ:
-                readable.append(eid)
+        else:
+            for state in all_states:
+                eid = state.entity_id
+                perm = resolve(eid, token, hass)
+                if perm == Permission.WRITE:
+                    readable.append(eid)
+                    writable.append(eid)
+                elif perm == Permission.READ:
+                    readable.append(eid)
 
+        # capability_flags reports raw stored values without the pass_through OR adjustments
+        # applied by _build_server_info / _build_context_json. This is intentional: the
+        # admin scope view is a diagnostic tool and the admin should see actual stored flags,
+        # not the effective values a client would receive.
         return _ok({
             "token_id": token_id,
             "token_name": token.name,
@@ -1034,10 +1055,14 @@ class ATMAdminWipeView(HomeAssistantView):
 
         data.rate_limiter.destroy_all()
         data.rate_limit_notified.clear()
+        # token_counters is cleared here, before acquiring async_lock, to minimise the
+        # lock hold time. The race (a concurrent request incrementing a counter between
+        # this clear and the storage wipe) is accepted: wipe is destructive and should
+        # not be run concurrently with active token use. The counter orphan disappears
+        # on the next request for the wiped token, which will fail authentication.
         data.token_counters.clear()
         await data.audit.async_wipe()
 
-        from .helpers import cancel_expiry_timer
         for _tid in list(data.expiry_timers):
             cancel_expiry_timer(data, _tid)
         async with data.store.async_lock:

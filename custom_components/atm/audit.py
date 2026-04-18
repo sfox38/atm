@@ -105,7 +105,7 @@ class AuditLog:
 
         if outcome == "allowed" and not settings.log_allowed:
             return
-        if outcome in ("denied", "not_found", "not_implemented") and not settings.log_denied:
+        if outcome in ("denied", "not_found", "not_implemented", "invalid_request") and not settings.log_denied:
             return
         if outcome == "rate_limited" and not settings.log_rate_limited:
             return

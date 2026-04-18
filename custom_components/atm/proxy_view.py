@@ -31,6 +31,8 @@ from .helpers import (
     FilteredStates as _FilteredStates,
     ScrubbedState as _ScrubbedState,
     build_error_response as _error,
+    build_permitted_states as _build_permitted_states,
+    collect_log_entries as _collect_log_entries,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
@@ -390,6 +392,16 @@ class ATMHistoryView(HomeAssistantView):
         if start_time < max_start:
             start_time = max_start
 
+        limit_int: int | None = None
+        limit_raw = request.query.get("limit")
+        if limit_raw:
+            try:
+                limit_int = int(limit_raw)
+                if limit_int <= 0:
+                    return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
+            except ValueError:
+                return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
+
         try:
             import functools
 
@@ -412,16 +424,6 @@ class ATMHistoryView(HomeAssistantView):
         except Exception:
             _LOGGER.warning("History call failed for request %s", request_id, exc_info=True)
             return _error("gateway_timeout", "History call failed.", 504, request_id)
-
-        limit_int: int | None = None
-        limit_raw = request.query.get("limit")
-        if limit_raw:
-            try:
-                limit_int = int(limit_raw)
-                if limit_int <= 0:
-                    return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
-            except ValueError:
-                return _error("invalid_request", "limit must be a positive integer.", 400, request_id)
 
         output: dict[str, Any] = {}
         effective_limit = limit_int if limit_int is not None else _MAX_HISTORY_STATES_PER_ENTITY
@@ -610,18 +612,7 @@ class ATMTemplateView(HomeAssistantView):
         try:
             from homeassistant.helpers import template as template_helper
 
-            if token.pass_through:
-                permitted = {
-                    s.entity_id: _ScrubbedState(s)
-                    for s in hass.states.async_all()
-                    if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
-                }
-            else:
-                permitted = {
-                    s.entity_id: _ScrubbedState(s)
-                    for s in hass.states.async_all()
-                    if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
-                }
+            permitted = _build_permitted_states(token, hass)
 
             filtered_states = _FilteredStates(permitted)
 
@@ -753,48 +744,7 @@ class ATMServicesView(HomeAssistantView):
         return _json_response(output, 200, request_id, rl_result)
 
 
-_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
-_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
-_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
 _DEFAULT_LOG_LIMIT = 50
-
-
-def _collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
-    """Read system_log records, filter, scrub, and return newest-first."""
-    min_rank = _LOG_LEVEL_RANK.get(level.upper(), _LOG_LEVEL_RANK["WARNING"])
-    syslog = hass.data.get("system_log")
-    if syslog is None:
-        return []
-    records = getattr(syslog, "records", {})
-    entries: list[dict] = []
-    for record in records.values():
-        record_level = getattr(record, "level", "")
-        if _LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
-            continue
-        logger_name = getattr(record, "name", "")
-        if any(logger_name.startswith(pfx) for pfx in _ATM_LOGGER_PREFIXES):
-            continue
-        if integration:
-            if not (
-                logger_name.startswith(f"homeassistant.components.{integration}")
-                or logger_name.startswith(f"custom_components.{integration}")
-            ):
-                continue
-        messages = getattr(record, "message", [])
-        msg = list(messages)[-1] if messages else ""
-        exc_parts = getattr(record, "exception", [])
-        exc_str: str | None = "".join(exc_parts) if exc_parts else None
-        entries.append({
-            "timestamp": getattr(record, "timestamp", 0),
-            "first_occurred": getattr(record, "first_occurred", 0),
-            "level": record_level,
-            "logger": logger_name,
-            "message": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
-            "exception": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
-            "occurrences": getattr(record, "count", 1),
-        })
-    entries.sort(key=lambda e: e["timestamp"], reverse=True)
-    return entries[:limit]
 
 
 class ATMLogsView(HomeAssistantView):

@@ -101,8 +101,6 @@ class ATMTokenSensor(SensorEntity):
         sensor_type = self._sensor_type
 
         if sensor_type == "status":
-            if token.revoked:
-                return "revoked"
             if token.is_expired():
                 return "expired"
             return "active"
