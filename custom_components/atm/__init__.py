@@ -91,7 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_flush = async_track_time_interval(hass, _flush_last_used, FLUSH_INTERVAL)
     entry.async_on_unload(cancel_flush)
 
-    def _push_sensor_updates(_now=None) -> None:
+    async def _push_sensor_updates(_now=None) -> None:
         for sensors in data.token_id_sensors.values():
             for sensor in sensors:
                 if sensor.hass is not None:
