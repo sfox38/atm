@@ -940,7 +940,8 @@ async def _tool_call_service(
                 resource,
             )
         except ServiceNotFound:
-            return _tool_error("Service not found."), "denied", resource
+            # Return generic error - spec §4.3: never confirm or deny service existence.
+            return _tool_error("Forbidden."), "denied", resource
         except HomeAssistantError:
             return _tool_error("Forbidden."), "denied", resource
         return _tool_success(json.dumps({"success": True})), "allowed", resource
@@ -1001,7 +1002,8 @@ async def _tool_call_service(
             resource,
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", resource
+        # Return generic error - spec §4.3: never confirm or deny service existence.
+        return _tool_error("Forbidden."), "denied", resource
     except HomeAssistantError:
         return _tool_error("Forbidden."), "denied", resource
 
@@ -1113,7 +1115,7 @@ async def _tool_render_template(
 async def _tool_create_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
-    """MCP tool: create a new UI automation in core.automation storage."""
+    """MCP tool: create a new UI automation by appending to automations.yaml."""
     if not token.allow_automation_write:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "create_automation"
 
@@ -1367,7 +1369,7 @@ async def _tool_restart_ha(
             "restart_ha",
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", "restart_ha"
+        return _tool_error("Restart failed."), "denied", "restart_ha"
     except HomeAssistantError:
         return _tool_error("Restart failed."), "denied", "restart_ha"
 
@@ -1575,7 +1577,7 @@ async def _tool_intent_action(
             tool_name,
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", tool_name
+        return _tool_error("Service call failed."), "denied", tool_name
     except HomeAssistantError:
         return _tool_error("Service call failed."), "denied", tool_name
 
@@ -1905,7 +1907,7 @@ async def _tool_hass_cancel_all_timers(
         except asyncio.TimeoutError:
             pass
         except ServiceNotFound:
-            return _tool_error("Service not found."), "denied", "HassCancelAllTimers"
+            return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
         except HomeAssistantError:
             return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
     return _tool_success(json.dumps({
@@ -1972,7 +1974,7 @@ async def _tool_hass_broadcast(
             "HassBroadcast",
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", "HassBroadcast"
+        return _tool_error("Broadcast failed."), "denied", "HassBroadcast"
     except HomeAssistantError:
         return _tool_error("Broadcast failed. No compatible satellite devices found."), "denied", "HassBroadcast"
 
@@ -2110,6 +2112,7 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
             "allow_template_render": token.allow_template_render or token.pass_through,
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
+            "allow_service_response": token.allow_service_response or token.pass_through,
             "allow_broadcast": token.allow_broadcast or token.pass_through,
             "allow_log_read": token.allow_log_read,
         },
@@ -2123,8 +2126,9 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     lines: list[str] = []
 
     if token.pass_through:
-        states = hass.states.async_all()
-        count = sum(1 for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS)
+        # Use build_permitted_states for an accurate count that respects ATM-platform
+        # entity filtering and use_assist_exposure (same set the token actually sees).
+        count = len(_build_permitted_states(token, hass))
         lines.append("This token operates in pass-through mode.")
         lines.append(
             f"It has unrestricted access to all {count} accessible Home Assistant entities and services."
@@ -2185,17 +2189,26 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
     states = hass.states.async_all()
 
     if token.pass_through:
+        _expose_check = None
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            _expose_check = lambda eid: _should_expose(hass, "conversation", eid)
         for state in states:
-            if state.entity_id.split(".")[0] in BLOCKED_DOMAINS:
+            eid = state.entity_id
+            if eid.split(".")[0] in BLOCKED_DOMAINS:
                 continue
-            entry = registry.async_get(state.entity_id)
+            entry = registry.async_get(eid)
             # Exclude ATM telemetry sensors (registered to the atm platform) so
             # pass_through tokens see the same entity set as build_permitted_states().
             if entry is not None and entry.platform == DOMAIN:
                 continue
+            if _expose_check is not None and not _expose_check(eid):
+                continue
             area_id = _resolve_area_id(entry, dev_registry)
             entities.append({
-                "entity_id": state.entity_id,
+                "entity_id": eid,
                 "permission": "READ/WRITE",
                 "area_id": area_id,
             })
@@ -2226,6 +2239,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             "allow_template_render": token.allow_template_render or token.pass_through,
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
+            "allow_service_response": token.allow_service_response or token.pass_through,
             "allow_broadcast": token.allow_broadcast or token.pass_through,
             "allow_log_read": token.allow_log_read,
         },

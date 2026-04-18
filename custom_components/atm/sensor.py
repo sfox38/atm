@@ -71,7 +71,9 @@ class ATMTokenSensor(SensorEntity):
     @property
     def state_class(self):
         if self._sensor_type in self._COUNT_TYPES:
-            return SensorStateClass.MEASUREMENT
+            # Counters are monotonically increasing totals; TOTAL_INCREASING is the
+            # correct state class for HA statistics semantics (not MEASUREMENT).
+            return SensorStateClass.TOTAL_INCREASING
         if self._sensor_type == "expires_in" and self._token.expires_at is not None:
             return SensorStateClass.MEASUREMENT
         return None

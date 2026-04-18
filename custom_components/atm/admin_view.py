@@ -179,6 +179,14 @@ async def _build_entity_tree(hass: Any) -> dict:
         if domain in BLOCKED_DOMAINS:
             continue
 
+        # Exclude ATM's own telemetry sensors (sensor.atm_* entities registered to the
+        # atm platform). They live in the sensor domain so BLOCKED_DOMAINS won't catch them.
+        # Showing them would let admins grant permissions that the runtime policy engine
+        # always blocks, causing confusion. Spec §3.7 only mentions the atm domain, but
+        # the intent is that ATM internals don't appear in the permission UI.
+        if entry.platform == DOMAIN:
+            continue
+
         state = hass.states.get(entity_id)
         friendly_name = None
         if state:
@@ -367,6 +375,7 @@ class ATMAdminTokensView(HomeAssistantView):
         pass_through = bool(body.get("pass_through", False))
         if pass_through and not body.get("confirm_pass_through"):
             return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
+        use_assist_exposure = bool(body.get("use_assist_exposure", False)) if pass_through else False
 
         expires_at = None
         if "expires_at" in body:
@@ -393,6 +402,7 @@ class ATMAdminTokensView(HomeAssistantView):
                 created_by=user.id,
                 expires_at=expires_at,
                 pass_through=pass_through,
+                use_assist_exposure=use_assist_exposure,
                 rate_limit_requests=rate_limit_requests,
                 rate_limit_burst=rate_limit_burst,
             )

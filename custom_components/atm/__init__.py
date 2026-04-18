@@ -45,6 +45,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         audit=audit,
         sse_connections={},
     )
+    # hass.data is keyed by DOMAIN (not config entry ID). This is intentional: the config
+    # flow enforces a single ATM instance via async_abort("already_configured"), so there
+    # is always at most one entry. Keying by entry ID would add complexity for no benefit.
     hass.data[DOMAIN] = data
 
     from .admin_view import ALL_ADMIN_VIEWS

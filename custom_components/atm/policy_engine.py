@@ -133,18 +133,28 @@ def filter_entities_for_token(
     """Filter a list of State objects to those accessible by token, scrub sensitive attributes.
 
     Always scrubs sensitive attributes and blocks the ATM domain, even in pass-through mode.
+    Applies use_assist_exposure filtering for pass_through tokens (spec §2.6).
     """
     if token.pass_through:
         registry = er.async_get(hass)
-        return [
-            scrub_sensitive_attributes(e)
-            for e in entities
-            if e.entity_id.split(".")[0] not in BLOCKED_DOMAINS
-            and not (
-                (entry := registry.async_get(e.entity_id)) is not None
-                and entry.platform == DOMAIN
+        _expose_check = None
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
             )
-        ]
+            _expose_check = lambda eid: _should_expose(hass, "conversation", eid)
+        result = []
+        for e in entities:
+            eid = e.entity_id
+            if eid.split(".")[0] in BLOCKED_DOMAINS:
+                continue
+            entry = registry.async_get(eid)
+            if entry is not None and entry.platform == DOMAIN:
+                continue
+            if _expose_check is not None and not _expose_check(eid):
+                continue
+            result.append(scrub_sensitive_attributes(e))
+        return result
     return [
         scrub_sensitive_attributes(e)
         for e in entities
@@ -348,8 +358,21 @@ def template_blocklist_vars() -> dict:
     Pass as **template_blocklist_vars() when building the variables dict for
     Template.async_render(). Jinja2 local variables shadow globals of the same name,
     so these stubs override HA's built-in functions that could bypass ATM filtering.
+
+    Spec §3.4 requirements implemented here:
+    - 'secrets' removed entirely (shadowed with None; attribute access raises AttributeError)
+    - 'hass' replaced with None (safe subset is impractical to implement; None causes
+      AttributeError on any access, which HA's template engine surfaces as a template error)
+    - 'config_entry_attr()' blocked (returns None, preventing integration metadata leaks)
+    - 'device_attr()' blocked (already present; prevents device metadata enumeration)
+    - Enumeration helpers blocked (return empty iterables)
     """
     return {
+        # Spec §3.4: remove secrets and replace hass with a safe (non-functional) substitute.
+        "hass": None,
+        "secrets": None,
+        # Spec §3.4: block config_entry_attr() to prevent integration metadata enumeration.
+        "config_entry_attr": lambda *a, **kw: None,
         "integration_entities": lambda *a, **kw: [],
         "area_entities": lambda *a, **kw: [],
         "area_devices": lambda *a, **kw: [],
