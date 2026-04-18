@@ -142,7 +142,11 @@ class TokenRecord:
     def to_storage_dict(self) -> dict:
         d = self.to_dict()
         d["token_hash"] = self.token_hash
-        d["use_assist_exposure"] = self.use_assist_exposure
+        # use_assist_exposure is only meaningful for pass_through tokens (spec §2.6).
+        # to_dict() already conditionally includes it; storage mirrors that behavior
+        # so scoped tokens do not accumulate a stale field over their lifetime.
+        if self.pass_through:
+            d["use_assist_exposure"] = self.use_assist_exposure
         return d
 
     @classmethod
@@ -184,7 +188,11 @@ class TokenRecord:
 
 @dataclass
 class ArchivedTokenRecord:
-    """Archived snapshot of a revoked or expired token. Retained for audit purposes."""
+    """Archived snapshot of a revoked or expired token. Retained for audit purposes.
+
+    Spec §2.4: only audit-trail fields are retained. pass_through, capability flags,
+    rate limit parameters, and permission tree are NOT stored in archived records.
+    """
 
     id: str
     name: str
@@ -195,7 +203,6 @@ class ArchivedTokenRecord:
     revoked: bool = False
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
-    pass_through: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -207,7 +214,6 @@ class ArchivedTokenRecord:
             "revoked": self.revoked,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
-            "pass_through": self.pass_through,
         }
 
     def to_storage_dict(self) -> dict:
@@ -227,7 +233,8 @@ class ArchivedTokenRecord:
             revoked=data.get("revoked", False),
             expires_at=_parse_dt(data.get("expires_at")),
             last_used_at=_parse_dt(data.get("last_used_at")),
-            pass_through=data.get("pass_through", False),
+            # pass_through and other privilege fields are intentionally not loaded even
+            # if present in older storage records (spec §2.4 excludes them from archives).
         )
 
 
@@ -341,6 +348,7 @@ class TokenStore:
         created_by: str,
         expires_at: datetime | None = None,
         pass_through: bool = False,
+        use_assist_exposure: bool = False,
         rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS,
         rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST,
     ) -> tuple[TokenRecord, str]:
@@ -360,6 +368,7 @@ class TokenStore:
             created_by=created_by,
             expires_at=expires_at,
             pass_through=pass_through,
+            use_assist_exposure=use_assist_exposure if pass_through else False,
             rate_limit_requests=rate_limit_requests,
             rate_limit_burst=rate_limit_burst if rate_limit_requests > 0 else 0,
             updated_at=now,
@@ -421,7 +430,6 @@ class TokenStore:
             revoked=revoked,
             expires_at=token.expires_at,
             last_used_at=token.last_used_at,
-            pass_through=token.pass_through,
         )
         self._archived[archived.id] = archived
         await self.async_save()
@@ -434,6 +442,7 @@ class TokenStore:
     ) -> TokenRecord | None:
         """Update mutable capability and rate-limit fields on a token and persist.
 
+        Callers must hold self.async_lock before calling to prevent concurrent writes.
         When rate_limit_requests is set to 0, rate_limit_burst is forced to 0.
         Returns None if the token is not found.
         """

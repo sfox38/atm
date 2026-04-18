@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -18,6 +19,8 @@ from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
 
@@ -42,6 +45,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         audit=audit,
         sse_connections={},
     )
+    # hass.data is keyed by DOMAIN (not config entry ID). This is intentional: the config
+    # flow enforces a single ATM instance via async_abort("already_configured"), so there
+    # is always at most one entry. Keying by entry ID would add complexity for no benefit.
     hass.data[DOMAIN] = data
 
     from .admin_view import ALL_ADMIN_VIEWS
@@ -91,7 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_flush = async_track_time_interval(hass, _flush_last_used, FLUSH_INTERVAL)
     entry.async_on_unload(cancel_flush)
 
-    def _push_sensor_updates(_now=None) -> None:
+    async def _push_sensor_updates(_now=None) -> None:
         for sensors in data.token_id_sensors.values():
             for sensor in sensors:
                 if sensor.hass is not None:
@@ -111,6 +117,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await audit.async_save()
             except asyncio.CancelledError:
                 return
+            except Exception:
+                _LOGGER.warning("Audit flush failed; will retry next interval", exc_info=True)
 
     audit_task = hass.async_create_background_task(
         _audit_flush_loop(), "atm_audit_flush_loop"

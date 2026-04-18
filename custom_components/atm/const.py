@@ -13,6 +13,7 @@ PROXY_TIMEOUT_SECONDS = 30
 MAX_REQUEST_BODY_BYTES = 1_048_576
 MAX_ACTIVE_TOKENS_WARNING = 50
 MAX_SSE_CONNECTIONS_PER_TOKEN = 5
+MAX_BATCH_ITEMS = 50
 
 TOKEN_PREFIX = "atm_"
 TOKEN_HEX_LENGTH = 64
@@ -77,6 +78,20 @@ PHYSICAL_GATE_SERVICES = frozenset({
     "cover/set_cover_position",
     "cover/set_cover_tilt_position",
 })
+
+# Flags that are ALWAYS evaluated regardless of pass_through state.
+# All other capability flags are bypassed when pass_through is True.
+PASS_THROUGH_EXEMPT_FLAGS = frozenset({
+    "allow_restart",
+    "allow_physical_control",
+    "allow_automation_write",
+    "allow_script_write",
+    "allow_log_read",
+})
+
+# Domains whose services require allow_physical_control.
+# Derived from the domain portion of PHYSICAL_GATE_SERVICES.
+PHYSICAL_GATE_DOMAINS = frozenset({"lock", "alarm_control_panel", "cover"})
 
 # assist_satellite feature bit for ANNOUNCE support.
 ANNOUNCE_BIT = 2

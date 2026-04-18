@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -13,8 +14,8 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
-from .policy_engine import parse_relative_time
+from .const import BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
+from .policy_engine import Permission, parse_relative_time, resolve
 from .token_store import token_name_slug
 
 if TYPE_CHECKING:
@@ -23,6 +24,83 @@ if TYPE_CHECKING:
     from .data import ATMData
     from .rate_limiter import RateLimitResult
     from .token_store import TokenRecord
+
+
+def build_permitted_states(token: TokenRecord, hass: HomeAssistant) -> dict:
+    """Return a {entity_id: ScrubbedState} dict for entities accessible to a token.
+
+    For pass_through tokens this includes every entity except those in BLOCKED_DOMAINS,
+    entities registered to the ATM platform (sensor.atm_* telemetry sensors), and -
+    when use_assist_exposure is True - entities not exposed to HA Assist.
+    For scoped tokens only READ/WRITE-accessible entities are included.
+
+    This is the single source of truth for template sandboxes in both proxy_view.py
+    and mcp_view.py. All template handlers must use this function so the ATM-platform
+    check and use_assist_exposure filter never diverge.
+    """
+    from homeassistant.helpers import entity_registry as er_mod
+
+    if token.pass_through:
+        registry = er_mod.async_get(hass)
+        _expose_check = None
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            _expose_check = lambda eid: _should_expose(hass, "conversation", eid)
+        result: dict = {}
+        for s in hass.states.async_all():
+            eid = s.entity_id
+            if eid.split(".")[0] in BLOCKED_DOMAINS:
+                continue
+            entry = registry.async_get(eid)
+            if entry is not None and entry.platform == DOMAIN:
+                continue
+            if _expose_check is not None and not _expose_check(eid):
+                continue
+            result[eid] = ScrubbedState(s)
+        return result
+    return {
+        s.entity_id: ScrubbedState(s)
+        for s in hass.states.async_all()
+        if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
+    }
+
+
+def build_permitted_entity_ids(token: TokenRecord, hass: HomeAssistant) -> set:
+    """Return the set of entity IDs accessible to a token, including registry-only entities.
+
+    Unlike build_permitted_states (which needs current State objects), this function
+    unions live states with the entity registry so that history and statistics endpoints
+    can query recorder data for entities that are temporarily offline or disabled.
+    Also applies use_assist_exposure filtering for pass_through tokens.
+    """
+    from homeassistant.helpers import entity_registry as er_mod
+
+    registry = er_mod.async_get(hass)
+    candidate_ids: set[str] = {s.entity_id for s in hass.states.async_all()}
+    candidate_ids.update(entry.entity_id for entry in registry.entities.values())
+
+    if token.pass_through:
+        _expose_check = None
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            _expose_check = lambda eid: _should_expose(hass, "conversation", eid)
+        return {
+            eid for eid in candidate_ids
+            if eid.split(".")[0] not in BLOCKED_DOMAINS
+            and not (
+                (entry := registry.async_get(eid)) is not None
+                and entry.platform == DOMAIN
+            )
+            and (_expose_check is None or _expose_check(eid))
+        }
+    return {
+        eid for eid in candidate_ids
+        if resolve(eid, token, hass) in (Permission.READ, Permission.WRITE)
+    }
 
 
 def build_error_response(
@@ -77,19 +155,23 @@ def log_request(
 def fire_rate_limit_events(hass: HomeAssistant, data: ATMData, token: TokenRecord) -> None:
     """Fire the atm_rate_limited bus event and optional persistent notification.
 
-    Throttled to at most once per token per minute to avoid event floods.
+    The event fires on every 429 (spec §3.8 item 4 has no throttle qualifier).
+    The persistent notification is throttled to at most once per token per minute
+    to prevent notification flooding during sustained abuse (spec §3.8 item 3).
     """
-    now_mono = time.monotonic()
-    last = data.rate_limit_notified.get(token.id, 0.0)
-    if now_mono - last >= 60.0:
-        data.rate_limit_notified[token.id] = now_mono
-        hass.bus.async_fire("atm_rate_limited", {
-            "token_id": token.id,
-            "token_name": token.name,
-            "timestamp": utcnow().isoformat(),
-        })
-        settings = data.store.get_settings()
-        if settings.notify_on_rate_limit:
+    # Event fires on every 429 - not throttled.
+    hass.bus.async_fire("atm_rate_limited", {
+        "token_id": token.id,
+        "token_name": token.name,
+        "timestamp": utcnow().isoformat(),
+    })
+    # Notification is throttled.
+    settings = data.store.get_settings()
+    if settings.notify_on_rate_limit:
+        now_mono = time.monotonic()
+        last = data.rate_limit_notified.get(token.id, 0.0)
+        if now_mono - last >= 60.0:
+            data.rate_limit_notified[token.id] = now_mono
             hass.async_create_task(
                 hass.services.async_call(
                     "persistent_notification",
@@ -156,6 +238,10 @@ async def get_authenticated_token(
     hash lookup, revocation, expiry, and rate limits in that order.
     """
     if data.store.get_settings().kill_switch:
+        # Spec §4.1 says kill-switch mode should make ATM "invisible on the network."
+        # At startup that is achieved by not registering any routes. At runtime, aiohttp
+        # does not support unregistering routes, so 503 is the closest approximation.
+        # This is a known architectural limitation; the routes exist but refuse service.
         return build_error_response("service_unavailable", "Service unavailable.", 503, request_id)
 
     _401 = build_error_response("unauthorized", "Unauthorized.", 401, request_id)
@@ -410,6 +496,49 @@ class FilteredStates:
             for eid, s in self._permitted.items()
             if eid.split(".")[0] == domain
         }
+
+
+_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
+_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
+_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
+
+
+def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
+    """Read system_log records, filter, scrub, and return newest-first."""
+    min_rank = _LOG_LEVEL_RANK.get(level.upper(), _LOG_LEVEL_RANK["WARNING"])
+    syslog = hass.data.get("system_log")
+    if syslog is None:
+        return []
+    records = getattr(syslog, "records", {})
+    entries: list[dict] = []
+    for record in records.values():
+        record_level = getattr(record, "level", "")
+        if _LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
+            continue
+        logger_name = getattr(record, "name", "")
+        if any(logger_name.startswith(pfx) for pfx in _ATM_LOGGER_PREFIXES):
+            continue
+        if integration:
+            if not (
+                logger_name.startswith(f"homeassistant.components.{integration}")
+                or logger_name.startswith(f"custom_components.{integration}")
+            ):
+                continue
+        messages = getattr(record, "message", [])
+        msg = list(messages)[-1] if messages else ""
+        exc_parts = getattr(record, "exception", [])
+        exc_str: str | None = "".join(exc_parts) if exc_parts else None
+        entries.append({
+            "timestamp": getattr(record, "timestamp", 0),
+            "first_occurred": getattr(record, "first_occurred", 0),
+            "level": record_level,
+            "logger": logger_name,
+            "message": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
+            "exception": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
+            "occurrences": getattr(record, "count", 1),
+        })
+    entries.sort(key=lambda e: e["timestamp"], reverse=True)
+    return entries[:limit]
 
 
 def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:

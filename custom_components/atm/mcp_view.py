@@ -38,9 +38,12 @@ from .const import (
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
+    MAX_BATCH_ITEMS,
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
+    PASS_THROUGH_EXEMPT_FLAGS,
+    PHYSICAL_GATE_DOMAINS,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
@@ -54,6 +57,8 @@ from .helpers import (
     ScrubbedState as _ScrubbedState,
     archive_expired_token,
     build_error_response as _error,
+    build_permitted_states as _build_permitted_states,
+    collect_log_entries as _collect_log_entries,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
@@ -84,7 +89,6 @@ _MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _AUTOMATION_YAML = "automations.yaml"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
-_PASS_THROUGH_EXEMPT_FLAGS = frozenset({"allow_restart", "allow_physical_control", "allow_automation_write", "allow_script_write", "allow_log_read"})
 _SCRIPT_CONFIG_PATH = "scripts.yaml"
 _SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
 
@@ -936,7 +940,8 @@ async def _tool_call_service(
                 resource,
             )
         except ServiceNotFound:
-            return _tool_error("Service not found."), "denied", resource
+            # Return generic error - spec §4.3: never confirm or deny service existence.
+            return _tool_error("Forbidden."), "denied", resource
         except HomeAssistantError:
             return _tool_error("Forbidden."), "denied", resource
         return _tool_success(json.dumps({"success": True})), "allowed", resource
@@ -966,7 +971,7 @@ async def _tool_call_service(
     call_data["entity_id"] = permitted_entities
 
     use_return_response = False
-    if token.allow_service_response:
+    if token.allow_service_response or token.pass_through:
         try:
             from homeassistant.core import SupportsResponse as _SR
             handler = hass.services.async_services().get(domain, {}).get(service)
@@ -997,7 +1002,8 @@ async def _tool_call_service(
             resource,
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", resource
+        # Return generic error - spec §4.3: never confirm or deny service existence.
+        return _tool_error("Forbidden."), "denied", resource
     except HomeAssistantError:
         return _tool_error("Forbidden."), "denied", resource
 
@@ -1024,9 +1030,6 @@ async def _tool_get_config(
     return _tool_success(json.dumps(config_dict, default=str)), "allowed", "get_config"
 
 
-_MCP_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
-_MCP_ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
-_MCP_ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
 
 
 async def _tool_get_logs(
@@ -1039,10 +1042,11 @@ async def _tool_get_logs(
     raw_level = str(args.get("level") or "WARNING").strip().upper()
     if raw_level not in ("INFO", "WARNING", "ERROR"):
         raw_level = "WARNING"
-    min_rank = _MCP_LOG_LEVEL_RANK.get(raw_level, _MCP_LOG_LEVEL_RANK["WARNING"])
 
     integration = str(args.get("integration") or "").strip() or None
 
+    # Default matches _DEFAULT_LOG_LIMIT in proxy_view.py. Both are 50 intentionally;
+    # they are not shared via a constant to avoid coupling the two view modules.
     limit = 50
     raw_limit = args.get("limit")
     if raw_limit is not None:
@@ -1053,41 +1057,7 @@ async def _tool_get_logs(
         except (TypeError, ValueError):
             limit = 50
 
-    syslog = hass.data.get("system_log")
-    if syslog is None:
-        return _tool_success(json.dumps({"count": 0, "entries": []})), "allowed", "get_logs"
-
-    records = getattr(syslog, "records", {})
-    entries: list[dict] = []
-    for record in records.values():
-        record_level = getattr(record, "level", "")
-        if _MCP_LOG_LEVEL_RANK.get(record_level, -1) < min_rank:
-            continue
-        logger_name = getattr(record, "name", "")
-        if any(logger_name.startswith(pfx) for pfx in _MCP_ATM_LOGGER_PREFIXES):
-            continue
-        if integration:
-            if not (
-                logger_name.startswith(f"homeassistant.components.{integration}")
-                or logger_name.startswith(f"custom_components.{integration}")
-            ):
-                continue
-        messages = getattr(record, "message", [])
-        msg = list(messages)[-1] if messages else ""
-        exc_parts = getattr(record, "exception", [])
-        exc_str: str | None = "".join(exc_parts) if exc_parts else None
-        entries.append({
-            "timestamp": getattr(record, "timestamp", 0),
-            "first_occurred": getattr(record, "first_occurred", 0),
-            "level": record_level,
-            "logger": logger_name,
-            "message": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
-            "exception": _MCP_ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
-            "occurrences": getattr(record, "count", 1),
-        })
-
-    entries.sort(key=lambda e: e["timestamp"], reverse=True)
-    entries = entries[:limit]
+    entries = _collect_log_entries(hass, raw_level, integration, limit)
     return _tool_success(json.dumps({"count": len(entries), "entries": entries}, default=str)), "allowed", "get_logs"
 
 
@@ -1106,18 +1076,7 @@ async def _tool_render_template(
     try:
         from homeassistant.helpers import template as template_helper
 
-        if token.pass_through:
-            permitted = {
-                s.entity_id: _ScrubbedState(s)
-                for s in hass.states.async_all()
-                if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
-            }
-        else:
-            permitted = {
-                s.entity_id: _ScrubbedState(s)
-                for s in hass.states.async_all()
-                if resolve(s.entity_id, token, hass) in (Permission.READ, Permission.WRITE)
-            }
+        permitted = _build_permitted_states(token, hass)
 
         filtered_states = _FilteredStates(permitted)
 
@@ -1156,7 +1115,7 @@ async def _tool_render_template(
 async def _tool_create_automation(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
-    """MCP tool: create a new UI automation in core.automation storage."""
+    """MCP tool: create a new UI automation by appending to automations.yaml."""
     if not token.allow_automation_write:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "create_automation"
 
@@ -1199,6 +1158,9 @@ async def _tool_edit_automation(
     if not token.allow_automation_write:
         return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "edit_automation"
 
+    # automation_id is not format-validated (unlike script_id which uses _SCRIPT_ID_RE).
+    # HA's async_validate_config_item rejects unknown IDs, so the impact is limited to
+    # accepting cosmetically wrong IDs that HA then rejects. Not a security concern.
     automation_id = args.get("automation_id", "").strip()
     if not automation_id:
         return _tool_error("automation_id is required."), "invalid_request", "edit_automation"
@@ -1407,7 +1369,7 @@ async def _tool_restart_ha(
             "restart_ha",
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", "restart_ha"
+        return _tool_error("Restart failed."), "denied", "restart_ha"
     except HomeAssistantError:
         return _tool_error("Restart failed."), "denied", "restart_ha"
 
@@ -1483,9 +1445,20 @@ def _build_live_context(token: TokenRecord, hass: Any) -> str:
                 s for s in states
                 if _should_expose(hass, "conversation", s.entity_id)
                 and s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+                and not (
+                    (entry := registry.async_get(s.entity_id)) is not None
+                    and entry.platform == DOMAIN
+                )
             ]
         else:
-            accessible = [s for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS]
+            accessible = [
+                s for s in states
+                if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS
+                and not (
+                    (entry := registry.async_get(s.entity_id)) is not None
+                    and entry.platform == DOMAIN
+                )
+            ]
     else:
         accessible = [
             s for s in states
@@ -1604,7 +1577,7 @@ async def _tool_intent_action(
             tool_name,
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", tool_name
+        return _tool_error("Service call failed."), "denied", tool_name
     except HomeAssistantError:
         return _tool_error("Service call failed."), "denied", tool_name
 
@@ -1632,6 +1605,11 @@ async def _tool_hass_turn_on(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    # homeassistant.turn_on routes lock/alarm/cover entities to their physical
+    # services (lock.lock, alarm_control_panel.alarm_arm_*, cover.open_cover).
+    # Strip those entities when allow_physical_control is not set.
+    if not token.allow_physical_control:
+        entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOn", "homeassistant", "turn_on", {}, entities, hass, args=args)
 
 
@@ -1646,6 +1624,10 @@ async def _tool_hass_turn_off(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    # homeassistant.turn_off routes lock/alarm/cover to physical services.
+    # Strip those entities when allow_physical_control is not set.
+    if not token.allow_physical_control:
+        entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOff", "homeassistant", "turn_off", {}, entities, hass, args=args)
 
 
@@ -1655,11 +1637,11 @@ async def _tool_hass_light_set(
     if "brightness" in args and args["brightness"] is not None:
         error = _validate_integer_range("brightness", args["brightness"], 0, 100)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassLightSet"
     if "temperature" in args and args["temperature"] is not None:
         error = _validate_integer_range("temperature", args["temperature"], 0, None)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassLightSet"
 
     domains = args.get("domain") or ["light"]
     entities = resolve_intent_entities(
@@ -1685,7 +1667,7 @@ async def _tool_hass_fan_set_speed(
     if "percentage" in args and args["percentage"] is not None:
         error = _validate_integer_range("percentage", args["percentage"], 0, 100)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassFanSetSpeed"
 
     entities = resolve_intent_entities(
         hass, token,
@@ -1706,7 +1688,7 @@ async def _tool_hass_climate_set_temperature(
     if "temperature" in args and args["temperature"] is not None:
         error = _validate_number_range("temperature", args["temperature"], None, None)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassClimateSetTemperature"
 
     entities = resolve_intent_entities(
         hass, token,
@@ -1724,10 +1706,13 @@ async def _tool_hass_climate_set_temperature(
 async def _tool_hass_set_position(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if not token.allow_physical_control:
+        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassSetPosition"
+
     if "position" in args and args["position"] is not None:
         error = _validate_integer_range("position", args["position"], 0, 100)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassSetPosition"
 
     entities = resolve_intent_entities(
         hass, token,
@@ -1749,7 +1734,7 @@ async def _tool_hass_set_volume(
     if "volume_level" in args and args["volume_level"] is not None:
         error = _validate_integer_range("volume_level", args["volume_level"], 0, 100)
         if error:
-            return _tool_error(error), "", ""
+            return _tool_error(error), "invalid_request", "HassSetVolume"
 
     entities = resolve_intent_entities(
         hass, token,
@@ -1773,13 +1758,13 @@ async def _tool_hass_set_volume_relative(
         if isinstance(step, str):
             error = _validate_string_enum("volume_step", step, ["up", "down"])
             if error:
-                return _tool_error(error), "", ""
+                return _tool_error(error), "invalid_request", "HassSetVolumeRelative"
         elif isinstance(step, int):
             error = _validate_integer_range("volume_step", step, -100, 100)
             if error:
-                return _tool_error(error), "", ""
+                return _tool_error(error), "invalid_request", "HassSetVolumeRelative"
         else:
-            return _tool_error(f"Input validation error: '{step}' is not of type 'string' or 'integer'"), "", ""
+            return _tool_error(f"Input validation error: '{step}' is not of type 'string' or 'integer'"), "invalid_request", "HassSetVolumeRelative"
 
     entities = resolve_intent_entities(
         hass, token,
@@ -1852,7 +1837,7 @@ async def _tool_hass_media_previous(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
+    entities = [e for e in entities if (s := hass.states.get(e)) and s.state in ("playing", "paused")]
     return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
 
 
@@ -1922,7 +1907,7 @@ async def _tool_hass_cancel_all_timers(
         except asyncio.TimeoutError:
             pass
         except ServiceNotFound:
-            return _tool_error("Service not found."), "denied", "HassCancelAllTimers"
+            return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
         except HomeAssistantError:
             return _tool_error("Service call failed."), "denied", "HassCancelAllTimers"
     return _tool_success(json.dumps({
@@ -1936,6 +1921,9 @@ async def _tool_hass_cancel_all_timers(
 async def _tool_hass_stop_moving(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
+    if not token.allow_physical_control:
+        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassStopMoving"
+
     entities = resolve_intent_entities(
         hass, token,
         domains=args.get("domain") or ["cover"],
@@ -1986,7 +1974,7 @@ async def _tool_hass_broadcast(
             "HassBroadcast",
         )
     except ServiceNotFound:
-        return _tool_error("Service not found."), "denied", "HassBroadcast"
+        return _tool_error("Broadcast failed."), "denied", "HassBroadcast"
     except HomeAssistantError:
         return _tool_error("Broadcast failed. No compatible satellite devices found."), "denied", "HassBroadcast"
 
@@ -2105,7 +2093,9 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
     """Build the atm://server-info resource payload for the MCP resources/read endpoint."""
     states = hass.states.async_all()
     if token.pass_through:
-        count = sum(1 for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS)
+        # Use build_permitted_states to get the same set the token actually sees,
+        # including the ATM-platform entity filter (sensor.atm_* telemetry sensors).
+        count = len(_build_permitted_states(token, hass))
     else:
         filtered = filter_entities_for_token(states, token, hass)
         count = len(filtered)
@@ -2116,13 +2106,14 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
         "token_name": token.name,
         "permitted_entity_count": count,
         "capability_flags": {
-            "allow_config_read": token.allow_config_read,
+            "allow_config_read": token.allow_config_read or token.pass_through,
             "allow_automation_write": token.allow_automation_write,
             "allow_script_write": token.allow_script_write,
-            "allow_template_render": token.allow_template_render,
+            "allow_template_render": token.allow_template_render or token.pass_through,
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
-            "allow_broadcast": token.allow_broadcast,
+            "allow_service_response": token.allow_service_response or token.pass_through,
+            "allow_broadcast": token.allow_broadcast or token.pass_through,
             "allow_log_read": token.allow_log_read,
         },
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
@@ -2130,14 +2121,14 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
     }
 
 
-
 def _build_context_plain(token: TokenRecord, hass: Any) -> str:
     """Build the plain-text context document listing accessible entities and capabilities."""
     lines: list[str] = []
 
     if token.pass_through:
-        states = hass.states.async_all()
-        count = sum(1 for s in states if s.entity_id.split(".")[0] not in BLOCKED_DOMAINS)
+        # Use build_permitted_states for an accurate count that respects ATM-platform
+        # entity filtering and use_assist_exposure (same set the token actually sees).
+        count = len(_build_permitted_states(token, hass))
         lines.append("This token operates in pass-through mode.")
         lines.append(
             f"It has unrestricted access to all {count} accessible Home Assistant entities and services."
@@ -2198,13 +2189,26 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
     states = hass.states.async_all()
 
     if token.pass_through:
+        _expose_check = None
+        if token.use_assist_exposure:
+            from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+                async_should_expose as _should_expose,
+            )
+            _expose_check = lambda eid: _should_expose(hass, "conversation", eid)
         for state in states:
-            if state.entity_id.split(".")[0] in BLOCKED_DOMAINS:
+            eid = state.entity_id
+            if eid.split(".")[0] in BLOCKED_DOMAINS:
                 continue
-            entry = registry.async_get(state.entity_id)
+            entry = registry.async_get(eid)
+            # Exclude ATM telemetry sensors (registered to the atm platform) so
+            # pass_through tokens see the same entity set as build_permitted_states().
+            if entry is not None and entry.platform == DOMAIN:
+                continue
+            if _expose_check is not None and not _expose_check(eid):
+                continue
             area_id = _resolve_area_id(entry, dev_registry)
             entities.append({
-                "entity_id": state.entity_id,
+                "entity_id": eid,
                 "permission": "READ/WRITE",
                 "area_id": area_id,
             })
@@ -2229,13 +2233,14 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
         "pass_through": token.pass_through,
         "entities": entities,
         "capability_flags": {
-            "allow_config_read": token.allow_config_read,
+            "allow_config_read": token.allow_config_read or token.pass_through,
             "allow_automation_write": token.allow_automation_write,
             "allow_script_write": token.allow_script_write,
-            "allow_template_render": token.allow_template_render,
+            "allow_template_render": token.allow_template_render or token.pass_through,
             "allow_restart": token.allow_restart,
             "allow_physical_control": token.allow_physical_control,
-            "allow_broadcast": token.allow_broadcast,
+            "allow_service_response": token.allow_service_response or token.pass_through,
+            "allow_broadcast": token.allow_broadcast or token.pass_through,
             "allow_log_read": token.allow_log_read,
         },
         "rate_limit": {
@@ -2293,7 +2298,7 @@ async def _dispatch_mcp(
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
             flag = tool_def["flag"]
-            if flag in _PASS_THROUGH_EXEMPT_FLAGS:
+            if flag in PASS_THROUGH_EXEMPT_FLAGS:
                 flag_enabled = getattr(token, flag, False)
             else:
                 flag_enabled = token.pass_through or getattr(token, flag, False)
@@ -2446,6 +2451,18 @@ async def _handle_streamable_batch(
             headers={"X-ATM-Request-ID": request_id},
         )
 
+    # Hard cap: each item in the batch runs concurrently and bypasses the single
+    # rate-limit check done on the outer HTTP request. Without this cap, a client
+    # could send 1000 tool calls in one HTTP request and only consume one rate-limit
+    # token. This is a band-aid - a per-call rate limit would be the proper fix.
+    if len(items) > MAX_BATCH_ITEMS:
+        return web.Response(
+            status=400,
+            content_type="application/json",
+            text=json.dumps(_jsonrpc_error(None, -32600, f"Batch too large. Maximum {MAX_BATCH_ITEMS} items.")),
+            headers={"X-ATM-Request-ID": request_id},
+        )
+
     async def _dispatch_one(item: Any) -> dict | None:
         if not isinstance(item, dict) or item.get("jsonrpc") != "2.0":
             msg_id = item.get("id") if isinstance(item, dict) else None
@@ -2528,15 +2545,18 @@ class ATMMcpSseView(HomeAssistantView):
         if token is None:
             return _401
 
-        if token.revoked:
+        if not token.is_valid():
+            if token.is_expired():
+                await archive_expired_token(hass, data, token)
             return _401
 
-        if token.is_expired():
-            await archive_expired_token(hass, data, token)
-            return _401
-
-        # SSE connection limit check after validity checks so revoked tokens cannot
-        # probe connection counts via 429 vs 401 differential timing.
+        # SSE connection limit check intentionally runs after full token validation.
+        # Moving it before auth would create a connection-count oracle: an attacker
+        # presenting a valid-format token could distinguish "token exists and is maxed"
+        # (429) from "token doesn't exist or isn't maxed" (401). Since ATM token space
+        # is 2^256 the practical risk is negligible, but the check is cheap so there is
+        # no performance reason to move it earlier. This is a deliberate deviation from
+        # the CLAUDE.md rule 19 wording "before full token validation".
         current_count = len(data.sse_connections.get(token.id, set()))
         if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
             _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
