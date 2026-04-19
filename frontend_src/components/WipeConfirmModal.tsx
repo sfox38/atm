@@ -44,7 +44,6 @@ export function WipeConfirmModal({ onWiped, onClose }: Props) {
         </div>
         {error && <div className="banner banner-error">{error}</div>}
         <div className="modal-actions">
-          <button className="btn btn-text" onClick={onClose} disabled={wiping}>Cancel</button>
           <button
             className="btn btn-danger"
             onClick={doWipe}
@@ -52,6 +51,7 @@ export function WipeConfirmModal({ onWiped, onClose }: Props) {
           >
             {wiping ? "Wiping..." : "Wipe All Data"}
           </button>
+          <button className="btn btn-text" onClick={onClose} disabled={wiping}>Cancel</button>
         </div>
       </div>
     </div>
