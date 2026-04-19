@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import type { TokenRecord, PatchTokenBody } from "../types";
 import { api } from "../api";
 
@@ -11,7 +11,6 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
   const [requests, setRequests] = useState(String(token.rate_limit_requests));
   const [burst, setBurst] = useState(String(token.rate_limit_burst));
   const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setRequests(String(token.rate_limit_requests));
@@ -41,16 +40,6 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
     }
   }
 
-  function scheduleAutoSave(reqStr: string, burstStr: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => save(reqStr, burstStr), 800);
-  }
-
-  function handleBlur(reqStr: string, burstStr: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    save(reqStr, burstStr);
-  }
-
   return (
     <div>
       {error && <div className="banner banner-error mb-8">{error}</div>}
@@ -62,8 +51,8 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
             type="number"
             min={0}
             value={requests}
-            onChange={(e) => { setRequests(e.target.value); scheduleAutoSave(e.target.value, burst); }}
-            onBlur={(e) => handleBlur(e.target.value, burst)}
+            onChange={(e) => setRequests(e.target.value)}
+            onBlur={(e) => save(e.target.value, burst)}
           />
         </div>
         <div className="field">
@@ -74,8 +63,8 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
             min={0}
             value={burstDisabled ? "0" : burst}
             disabled={burstDisabled}
-            onChange={(e) => { setBurst(e.target.value); scheduleAutoSave(requests, e.target.value); }}
-            onBlur={(e) => handleBlur(requests, e.target.value)}
+            onChange={(e) => setBurst(e.target.value)}
+            onBlur={(e) => save(requests, e.target.value)}
           />
         </div>
       </div>

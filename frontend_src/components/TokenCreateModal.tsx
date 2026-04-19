@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { TokenRecord, CreateTokenBody } from "../types";
 import { api } from "../api";
+import { copyToClipboard } from "../utils";
 
 const NAME_REGEX = /^[A-Za-z0-9_\-]{3,32}$/;
 
@@ -21,21 +22,6 @@ function addMinutes(m: number): string {
   return d.toISOString();
 }
 
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    await navigator.clipboard.writeText(text);
-  } else {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    document.execCommand("copy");
-    document.body.removeChild(textarea);
-  }
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

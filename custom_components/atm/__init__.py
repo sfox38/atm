@@ -17,12 +17,56 @@ from .audit import AuditLog
 from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL
 from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
+from .policy_engine import template_blocklist_vars
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
+
+# HA template globals that are safe (no entity state access). When the runtime
+# audit runs, any global not in this set and not in the blocklist triggers a
+# warning so new HA globals don't silently bypass ATM filtering.
+_SAFE_TEMPLATE_GLOBALS = frozenset({
+    "bool", "float", "int", "version", "typeof", "is_number",
+    "zip", "apply", "combine", "iif", "as_function", "pack", "unpack",
+    "merge_response", "e", "pi", "tau", "sin", "cos", "tan",
+    "asin", "acos", "atan", "atan2", "log", "sqrt", "average",
+    "median", "statistical_mode", "min", "max", "bitwise_and",
+    "bitwise_or", "bitwise_xor", "clamp", "wrap", "remap",
+    "slugify", "urlencode", "md5", "sha1", "sha256", "sha512",
+    "flatten", "shuffle", "intersect", "difference", "union",
+    "symmetric_difference", "set", "tuple", "as_datetime",
+    "as_local", "as_timedelta", "as_timestamp", "strptime",
+    "timedelta", "now", "utcnow", "relative_time", "time_since",
+    "time_until", "today_at",
+    "range", "lipsum", "dict", "cycler", "joiner", "namespace", "undefined",
+})
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
+
+
+def _audit_template_sandbox(hass: HomeAssistant) -> None:
+    """Warn about HA template globals not covered by ATM's blocklist.
+
+    Runs once at setup. Any unrecognized global triggers a log warning so
+    future HA versions adding new template functions don't silently bypass
+    ATM entity filtering.
+    """
+    try:
+        from homeassistant.helpers.template import TemplateEnvironment
+        blocked = set(template_blocklist_vars().keys())
+        overridden = {"states", "state_attr", "is_state", "is_state_attr", "has_value"}
+        known = blocked | overridden | _SAFE_TEMPLATE_GLOBALS
+        env = TemplateEnvironment(hass, limited=False, log_fn=None)
+        for name in env.globals:
+            if name not in known and not name.startswith("_"):
+                _LOGGER.warning(
+                    "ATM template sandbox: unrecognized HA global '%s' - "
+                    "this function is not blocked and may bypass entity filtering",
+                    name,
+                )
+    except Exception:
+        _LOGGER.debug("ATM: could not audit template globals", exc_info=True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -145,6 +189,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
     )
+
+    _audit_template_sandbox(hass)
 
     def _invalidate_entity_tree(_event=None) -> None:
         data.entity_tree_cache_valid = False

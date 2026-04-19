@@ -3,6 +3,7 @@ import type { TokenRecord, PatchTokenBody } from "../types";
 import ATM_ICON from "../../custom_components/atm/brand/icon.png";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
+import { formatDateTime, tokenStatus, copyToClipboard } from "../utils";
 import { CapabilityFlags } from "../components/CapabilityFlags";
 import { RateLimitConfig } from "../components/RateLimitConfig";
 import { PassThroughNotice } from "../components/PassThroughNotice";
@@ -17,32 +18,6 @@ interface Props {
   onRefresh?: () => void;
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "Never";
-  return new Date(iso).toLocaleString();
-}
-
-function tokenStatus(t: TokenRecord): string {
-  if (t.revoked) return "Revoked";
-  if (t.expires_at && new Date(t.expires_at) <= new Date()) return "Expired";
-  return "Active";
-}
-
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    await navigator.clipboard.writeText(text);
-  } else {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
-  }
-}
 
 interface ConfirmModalProps {
   title: string;
@@ -319,13 +294,13 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
               <div className="token-card-meta">
                 <div className="token-meta-table">
                   <span className="stat-label">Created</span>
-                  <span title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
+                  <span title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDateTime(token.created_at)}</span>
                   <span className="stat-label">Last Updated</span>
-                  <span title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
+                  <span title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDateTime(token.updated_at)}</span>
                   <span className="stat-label">Expires</span>
-                  <span>{formatDate(token.expires_at)}</span>
+                  <span>{formatDateTime(token.expires_at)}</span>
                   <span className="stat-label">Last Used</span>
-                  <span>{formatDate(token.last_used_at)}</span>
+                  <span>{formatDateTime(token.last_used_at)}</span>
                 </div>
               </div>
 

@@ -2,11 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import type { EntityTree, DomainTree, PermissionTree, NodeState } from "../types";
 import { PermissionSelector } from "./PermissionSelector";
 import { api } from "../api";
-
-const HIGH_RISK_DOMAINS = new Set([
-  "homeassistant", "recorder", "system_log", "hassio",
-  "backup", "notify", "persistent_notification", "mqtt",
-]);
+import { HIGH_RISK_DOMAINS } from "../utils";
 
 const INDIRECT_CONTROL_DOMAINS = new Set([
   "automation", "script", "scene",

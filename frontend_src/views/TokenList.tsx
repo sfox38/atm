@@ -4,6 +4,7 @@ import { TokenCreateModal } from "../components/TokenCreateModal";
 import { ArchivedTokenTable } from "../components/ArchivedTokenTable";
 import { api } from "../api";
 import { Loading, ErrorMsg, RefreshIcon } from "../index";
+import { formatDate, tokenStatus } from "../utils";
 
 const MAX_ACTIVE_TOKENS_WARNING = 50;
 
@@ -19,16 +20,6 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "Never";
-  return new Date(iso).toLocaleDateString();
-}
-
-function tokenStatus(t: TokenRecord): string {
-  if (t.revoked) return "Revoked";
-  if (t.expires_at && new Date(t.expires_at) <= new Date()) return "Expired";
-  return "Active";
-}
 
 type SortKey = "name" | "mode" | "status" | "created" | "updated" | "expires" | "last_used";
 type SortDir = "asc" | "desc";

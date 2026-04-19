@@ -11,12 +11,7 @@ import PANEL_CSS from "./atm-panel.css?inline";
 type Tab = "tokens" | "audit" | "settings";
 type Theme = "light" | "dark" | "auto";
 
-const HIGH_RISK_DOMAINS = new Set([
-  "homeassistant", "recorder", "system_log", "hassio",
-  "backup", "notify", "persistent_notification", "mqtt",
-]);
-
-export { HIGH_RISK_DOMAINS };
+export { HIGH_RISK_DOMAINS } from "./utils";
 
 function Loading() {
   return (

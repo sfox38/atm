@@ -153,11 +153,12 @@ def _validate_permission_tree_body(body: dict, rid: str) -> web.Response | None:
     return None
 
 
-async def _build_entity_tree(hass: Any) -> dict:
+def _build_entity_tree(hass: Any) -> dict:
     """Build a domain-keyed tree of all non-disabled, non-ATM entities.
 
-    Pulls from the entity, device, and area registries. The result is cached
-    in ATMData.entity_tree_cache and invalidated on registry change events.
+    Pulls from the entity, device, and area registries (all in-memory dicts).
+    Synchronous; never performs I/O. The result is cached in
+    ATMData.entity_tree_cache and invalidated on registry change events.
     """
     from homeassistant.helpers import area_registry as ar
     from homeassistant.helpers import device_registry as dr
@@ -830,7 +831,7 @@ class ATMAdminEntityTreeView(HomeAssistantView):
 
         async with data.entity_tree_lock:
             if not data.entity_tree_cache_valid or data.entity_tree_cache is None:
-                data.entity_tree_cache = await _build_entity_tree(hass)
+                data.entity_tree_cache = _build_entity_tree(hass)
                 data.entity_tree_cache_valid = True
 
         import functools

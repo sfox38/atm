@@ -67,6 +67,12 @@ class ATMTokenSensor(SensorEntity):
         self._data = data
         self._attr_unique_id = f"atm_{slug}_{sensor_type}"
         self._attr_name = sensor_type.replace("_", " ").title()
+        self._device_info = DeviceInfo(
+            identifiers={(DOMAIN, token.id)},
+            name=f"ATM Token: {token.name}",
+            manufacturer="Advanced Token Management",
+            model="Token Telemetry",
+        )
 
     @property
     def state_class(self):
@@ -90,12 +96,7 @@ class ATMTokenSensor(SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._token.id)},
-            name=f"ATM Token: {self._token.name}",
-            manufacturer="Advanced Token Management",
-            model="Token Telemetry",
-        )
+        return self._device_info
 
     @property
     def native_value(self):
