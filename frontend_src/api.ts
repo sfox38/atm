@@ -36,7 +36,15 @@ class ApiError extends Error {
 }
 
 async function _doReq<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
-  const token: string | undefined = hassInstance?.auth?.data?.access_token; // read fresh every call - do not cache token
+  // Proactively refresh if the token is expired or within 60s of expiry, avoiding a
+  // guaranteed 401 that HA would log as a ban warning.
+  if (!retried && hassInstance?.auth) {
+    const expires: number | undefined = hassInstance.auth.data?.expires;
+    if (expires !== undefined && Date.now() > expires - 60_000) {
+      await hassInstance.auth.refreshAccessToken();
+    }
+  }
+  const token: string | undefined = hassInstance?.auth?.data?.access_token;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const opts: RequestInit = { method, headers };
