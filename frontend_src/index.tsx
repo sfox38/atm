@@ -238,7 +238,7 @@ class ATMPanelElement extends HTMLElement {
   }
 
   private _render() {
-    if (this._root) {
+    if (this._root && this._hass) {
       this._root.render(
         <ATMApp
           hass={this._hass}
