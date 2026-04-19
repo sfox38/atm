@@ -136,6 +136,7 @@ def log_request(
     resource: str,
     outcome: str,
     client_ip: str,
+    payload: dict | None = None,
 ) -> None:
     """Record an audit entry and update in-memory token counters."""
     data.audit.record(
@@ -148,6 +149,7 @@ def log_request(
         client_ip=client_ip,
         settings=data.store.get_settings(),
         pass_through=token.pass_through,
+        payload=payload,
     )
     update_token_counter(data, token.id, outcome)
 

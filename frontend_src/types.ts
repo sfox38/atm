@@ -82,6 +82,7 @@ export interface AuditEntry {
   outcome: Outcome;
   client_ip: string;
   pass_through: boolean;
+  payload?: string | null;
 }
 
 export interface EntityInfo {

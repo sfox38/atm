@@ -207,12 +207,12 @@ class ATMServiceView(HomeAssistantView):
         service_key = f"{domain}/{service}"
         if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
         if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
         entity_id = body.get("entity_id")
@@ -237,17 +237,17 @@ class ATMServiceView(HomeAssistantView):
                     )
             except asyncio.TimeoutError:
                 _log(data, token, request_id=request_id, method="POST", resource=resource,
-                     outcome="allowed", client_ip=client_ip)
+                     outcome="allowed", client_ip=client_ip, payload=body)
                 return _json_response(
                     {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
                     200, request_id, rl_result,
                 )
             except (ServiceNotFound, HomeAssistantError):
                 _log(data, token, request_id=request_id, method="POST", resource=resource,
-                     outcome="denied", client_ip=client_ip)
+                     outcome="denied", client_ip=client_ip, payload=body)
                 return _error("forbidden", "Forbidden.", 403, request_id)
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="allowed", client_ip=client_ip)
+                 outcome="allowed", client_ip=client_ip, payload=body)
             return _json_response({"success": True}, 200, request_id, rl_result)
 
         try:
@@ -261,12 +261,12 @@ class ATMServiceView(HomeAssistantView):
             )
         except EntityCreationNotPermitted:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
         if not permitted_entities:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
         if domain in HIGH_RISK_DOMAINS:
@@ -307,7 +307,7 @@ class ATMServiceView(HomeAssistantView):
                 )
         except asyncio.TimeoutError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="allowed", client_ip=client_ip)
+                 outcome="allowed", client_ip=client_ip, payload=body)
             return _json_response(
                 {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
                 200, request_id, rl_result, extra_headers=extra,
@@ -317,17 +317,17 @@ class ATMServiceView(HomeAssistantView):
             # of a domain or service to the token holder." A 404 here leaks that the
             # service name is invalid; 403 is indistinguishable from a permission denial.
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
         except HomeAssistantError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="denied", client_ip=client_ip)
+                 outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
         filtered_response = filter_service_response(svc_response, token, hass) if svc_response is not None else None
 
         _log(data, token, request_id=request_id, method="POST", resource=resource,
-             outcome="allowed", client_ip=client_ip)
+             outcome="allowed", client_ip=client_ip, payload=body)
 
         resp_body: dict[str, Any] = {"success": True}
         if filtered_response is not None:

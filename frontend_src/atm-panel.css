@@ -706,7 +706,7 @@ select.input {
 .perm-summary-td         { padding: 5px 8px; white-space: nowrap; }
 .perm-summary-td-name    { padding: 5px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .perm-summary-td-id      { padding: 5px 8px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--atm-text-2); }
-.perm-summary-td-name.clickable, .perm-summary-td-id.clickable { cursor: pointer; text-decoration: underline dotted; }
+.perm-summary-td-name.clickable, .perm-summary-td-id.clickable { cursor: pointer; }
 .perm-summary-empty { color: var(--atm-text-2); font-size: 13px; margin: 0; }
 
 .perm-type-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
@@ -761,6 +761,8 @@ select.input {
 .detail-label { width: 90px; flex-shrink: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--atm-text-2); padding-top: 1px; }
 .detail-value { font-size: 13px; word-break: break-all; }
 .detail-value-mono { font-size: 13px; word-break: break-all; font-family: monospace; }
+.audit-payload-section { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--atm-divider); }
+.audit-payload-pre { margin: 0; font-size: 11px; font-family: monospace; background: var(--atm-surface-2, var(--atm-surface)); border: 1px solid var(--atm-divider); border-radius: 4px; padding: 8px; overflow-x: auto; white-space: pre; color: var(--atm-text); max-height: 300px; overflow-y: auto; }
 
 /* ============================================================
    Audit table
@@ -806,6 +808,12 @@ select.input {
   box-shadow: 0 2px 8px rgba(120,80,0,0.07);
 }
 .token-detail-body { padding-top: 16px; }
+@media (max-width: 900px) {
+  .token-detail-sticky { position: static; box-shadow: none; border-bottom: none; }
+  .token-detail-sticky .two-col > *:first-child { order: 1; }
+  .token-detail-sticky .two-col > *:last-child  { order: 2; }
+  .epe-card { height: auto; overflow: visible; }
+}
 
 /* Token info card - colored header */
 .token-info-card { overflow: hidden; }

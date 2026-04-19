@@ -2337,7 +2337,8 @@ async def _dispatch_mcp(
         arguments = params.get("arguments") or {}
         tool_result, outcome, resource = await _call_tool(tool_name, arguments, token, hass, data)
         _log(data, token, request_id=request_id, method=tool_name or "tools/call",
-             resource=resource, outcome=outcome, client_ip=client_ip)
+             resource=resource, outcome=outcome, client_ip=client_ip,
+             payload={"name": tool_name, "arguments": arguments})
         return _jsonrpc_result(msg_id, tool_result), tool_name or "tools/call", resource, outcome
 
     if method == "resources/list":

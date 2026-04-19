@@ -46,12 +46,16 @@ function buildLookups(entityTree: EntityTree | null | undefined): {
   deviceNames: Map<string, string>;
   domainFirstEntity: Map<string, string>;
   deviceFirstEntity: Map<string, string>;
+  entityToDevice: Map<string, string>;
+  deviceDomain: Map<string, string>;
 } {
   const entityNames = new Map<string, string>();
   const deviceNames = new Map<string, string>();
   const domainFirstEntity = new Map<string, string>();
   const deviceFirstEntity = new Map<string, string>();
-  if (!entityTree) return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
+  const entityToDevice = new Map<string, string>();
+  const deviceDomain = new Map<string, string>();
+  if (!entityTree) return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity, entityToDevice, deviceDomain };
   for (const [domainKey, domain] of Object.entries(entityTree)) {
     for (const [eid, info] of Object.entries(domain.entity_details)) {
       if (info.friendly_name) entityNames.set(eid, info.friendly_name);
@@ -62,9 +66,35 @@ function buildLookups(entityTree: EntityTree | null | undefined): {
     for (const [did, device] of Object.entries(domain.devices)) {
       deviceNames.set(did, device.name);
       if (device.entities[0]) deviceFirstEntity.set(did, device.entities[0]);
+      deviceDomain.set(did, domainKey);
+      for (const eid of device.entities) {
+        entityToDevice.set(eid, did);
+      }
     }
   }
-  return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
+  return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity, entityToDevice, deviceDomain };
+}
+
+function resolvedState(
+  permissions: PermissionTree,
+  item: SummaryItem,
+  entityToDevice: Map<string, string>,
+  deviceDomain: Map<string, string>,
+): NodeState {
+  // Pass 1: walk ancestor chain for RED
+  const toCheck: NodeState[] = [];
+  if (item.type === "entity") {
+    const deviceId = entityToDevice.get(item.id);
+    if (deviceId) toCheck.push(permissions.devices[deviceId]?.state ?? "GREY");
+    toCheck.push(permissions.domains[item.id.split(".")[0]]?.state ?? "GREY");
+  } else if (item.type === "device") {
+    const domain = deviceDomain.get(item.id);
+    if (domain) toCheck.push(permissions.domains[domain]?.state ?? "GREY");
+  }
+  toCheck.push(permissions.global?.state ?? "GREY");
+  if (toCheck.some((s) => s === "RED")) return "RED";
+  // Pass 2: item's own state is the most specific non-GREY grant
+  return item.state;
 }
 
 function SortHeader({
@@ -92,11 +122,21 @@ function SortHeader({
   );
 }
 
+function EffectiveCell({ permissions, item, entityToDevice, deviceDomain }: {
+  permissions: PermissionTree;
+  item: SummaryItem;
+  entityToDevice: Map<string, string>;
+  deviceDomain: Map<string, string>;
+}) {
+  const eff = resolvedState(permissions, item, entityToDevice, deviceDomain);
+  return <td className="perm-summary-td"><span className={STATE_CLASS[eff]}>{STATE_LABEL[eff]}</span></td>;
+}
+
 export function PermissionSummary({ permissions, entityTree, onEntityClick }: Props) {
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity } = useMemo(
+  const { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity, entityToDevice, deviceDomain } = useMemo(
     () => buildLookups(entityTree),
     [entityTree],
   );
@@ -168,7 +208,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="Name" col="friendly" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="ID" col="id" current={sortCol} dir={sortDir} onSort={handleSort} />
-          <SortHeader label="State" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
+          <SortHeader label="Effective" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
         </tr>
       </thead>
       <tbody>
@@ -202,9 +242,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
               >
                 {item.id}
               </td>
-              <td className="perm-summary-td">
-                <span className={STATE_CLASS[item.state]}>{STATE_LABEL[item.state]}</span>
-              </td>
+              <EffectiveCell permissions={permissions} item={item} entityToDevice={entityToDevice} deviceDomain={deviceDomain} />
             </tr>
           );
         })}
