@@ -12,9 +12,9 @@ export function KillSwitch({ settings, onToggle, saving }: Props) {
 
   return (
     <div className={active ? "kill-switch-active" : ""}>
-      <div className="toggle-row" style={{ border: "none", padding: 0 }}>
+      <div className="toggle-row toggle-row-plain">
         <div className="toggle-label">
-          <span style={{ fontWeight: 500, color: active ? "var(--error-color, #f44336)" : undefined }}>
+          <span className={active ? "kill-switch-label-active" : "kill-switch-label"}>
             {active ? "Kill switch ACTIVE - All ATM endpoints are disabled" : "Disable all ATM endpoints"}
           </span>
           <small>
@@ -23,14 +23,14 @@ export function KillSwitch({ settings, onToggle, saving }: Props) {
               : "When enabled, all ATM proxy and MCP endpoints are immediately disabled. The admin panel remains accessible."}
           </small>
         </div>
-        <label style={{ display: "flex", alignItems: "center", cursor: saving ? "not-allowed" : "pointer" }}>
+        <label className={`toggle-switch toggle-switch-danger${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
             checked={active}
             disabled={saving}
             onChange={(e) => onToggle(e.target.checked)}
-            style={{ width: 18, height: 18, accentColor: "var(--error-color, #f44336)", cursor: "inherit" }}
           />
+          <span className="toggle-switch-track" />
         </label>
       </div>
     </div>

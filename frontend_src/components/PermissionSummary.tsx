@@ -4,7 +4,7 @@ import type { PermissionTree, NodeState, EntityTree } from "../types";
 interface Props {
   permissions: PermissionTree;
   entityTree?: EntityTree | null;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
 }
 
 const STATE_LABEL: Record<NodeState, string> = {
@@ -34,23 +34,6 @@ const TYPE_LABEL: Record<NodeType, string> = {
   entity: "Entity",
 };
 
-const TYPE_BADGE_STYLE: Record<NodeType, React.CSSProperties> = {
-  domain: { background: "rgba(3,169,244,0.12)", color: "var(--primary-color, #03a9f4)" },
-  device: { background: "rgba(156,39,176,0.12)", color: "#9c27b0" },
-  entity: { background: "rgba(0,0,0,0.07)", color: "var(--secondary-text-color, #727272)" },
-};
-
-const BADGE_BASE: React.CSSProperties = {
-  display: "inline-block",
-  padding: "1px 7px",
-  borderRadius: 10,
-  fontSize: 11,
-  fontWeight: 600,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-  whiteSpace: "nowrap",
-};
-
 interface SummaryItem {
   id: string;
   type: NodeType;
@@ -61,19 +44,27 @@ interface SummaryItem {
 function buildLookups(entityTree: EntityTree | null | undefined): {
   entityNames: Map<string, string>;
   deviceNames: Map<string, string>;
+  domainFirstEntity: Map<string, string>;
+  deviceFirstEntity: Map<string, string>;
 } {
   const entityNames = new Map<string, string>();
   const deviceNames = new Map<string, string>();
-  if (!entityTree) return { entityNames, deviceNames };
-  for (const domain of Object.values(entityTree)) {
+  const domainFirstEntity = new Map<string, string>();
+  const deviceFirstEntity = new Map<string, string>();
+  if (!entityTree) return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
+  for (const [domainKey, domain] of Object.entries(entityTree)) {
     for (const [eid, info] of Object.entries(domain.entity_details)) {
       if (info.friendly_name) entityNames.set(eid, info.friendly_name);
     }
-    for (const [did, info] of Object.entries(domain.devices)) {
-      deviceNames.set(did, info.name);
+    const domFirst = domain.deviceless_entities[0]
+      ?? Object.values(domain.devices)[0]?.entities[0];
+    if (domFirst) domainFirstEntity.set(domainKey, domFirst);
+    for (const [did, device] of Object.entries(domain.devices)) {
+      deviceNames.set(did, device.name);
+      if (device.entities[0]) deviceFirstEntity.set(did, device.entities[0]);
     }
   }
-  return { entityNames, deviceNames };
+  return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
 }
 
 function SortHeader({
@@ -94,21 +85,9 @@ function SortHeader({
   return (
     <th
       onClick={() => onSort(col)}
-      style={{
-        cursor: "pointer",
-        userSelect: "none",
-        color: active ? "var(--primary-color, #03a9f4)" : "var(--secondary-text-color, #727272)",
-        whiteSpace: "nowrap",
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.08em",
-        padding: "6px 8px",
-        borderBottom: "2px solid var(--divider-color, #e0e0e0)",
-        textAlign: "left",
-      }}
+      className={`perm-summary-th${active ? " active" : ""}`}
     >
-      {label}<span style={{ fontSize: 9, opacity: active ? 1 : 0.5 }}>{arrow}</span>
+      {label}<span className={`perm-summary-arrow${active ? " active" : ""}`}>{arrow}</span>
     </th>
   );
 }
@@ -117,7 +96,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const { entityNames, deviceNames } = useMemo(
+  const { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity } = useMemo(
     () => buildLookups(entityTree),
     [entityTree],
   );
@@ -176,14 +155,14 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
 
   if (items.length === 0) {
     return (
-      <p style={{ color: "var(--secondary-text-color, #9e9e9e)", fontSize: 13, margin: 0 }}>
+      <p className="perm-summary-empty">
         No explicit permissions configured. All access denied by default.
       </p>
     );
   }
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 12, fontFamily: '"Roboto Mono", monospace' }}>
+    <table className="perm-summary-table">
       <thead>
         <tr>
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
@@ -194,33 +173,36 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
       </thead>
       <tbody>
         {sorted.map((item) => {
-          const isClickable = item.type === "entity" && !!onEntityClick;
-          const clickStyle: React.CSSProperties = isClickable
-            ? { cursor: "pointer", textDecoration: "underline dotted" }
-            : {};
-          const handleClick = isClickable ? () => onEntityClick!(item.id) : undefined;
+          let targetEntity: string | undefined;
+          let depth: "entity" | "device" | "domain" = "entity";
+          if (item.type === "entity") { targetEntity = item.id; depth = "entity"; }
+          else if (item.type === "domain") { targetEntity = domainFirstEntity.get(item.id); depth = "domain"; }
+          else if (item.type === "device") { targetEntity = deviceFirstEntity.get(item.id); depth = "device"; }
+          const isClickable = !!onEntityClick && !!targetEntity;
+          const handleClick = isClickable ? () => onEntityClick!(targetEntity!, depth) : undefined;
+          const title = isClickable ? `Simulate ${item.type} permissions for ${item.id}` : undefined;
           return (
-            <tr key={`${item.type}:${item.id}`} style={{ borderBottom: "1px solid var(--divider-color, #e0e0e0)" }}>
-              <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
-                <span style={{ ...BADGE_BASE, ...TYPE_BADGE_STYLE[item.type] }}>
+            <tr key={`${item.type}:${item.id}`} className="perm-summary-tr">
+              <td className="perm-summary-td">
+                <span className={`perm-type-badge perm-type-${item.type}`}>
                   {TYPE_LABEL[item.type]}
                 </span>
               </td>
               <td
-                style={{ padding: "5px 8px", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...clickStyle }}
+                className={`perm-summary-td-name${isClickable ? " clickable" : ""}`}
                 onClick={handleClick}
-                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+                title={title}
               >
-                {item.friendlyName !== item.id ? item.friendlyName : <span style={{ color: "var(--secondary-text-color, #9e9e9e)" }}>-</span>}
+                {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
               </td>
               <td
-                style={{ padding: "5px 8px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--secondary-text-color, #9e9e9e)", ...clickStyle }}
+                className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}
                 onClick={handleClick}
-                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+                title={title}
               >
                 {item.id}
               </td>
-              <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
+              <td className="perm-summary-td">
                 <span className={STATE_CLASS[item.state]}>{STATE_LABEL[item.state]}</span>
               </td>
             </tr>

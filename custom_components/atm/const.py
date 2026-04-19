@@ -3,8 +3,9 @@
 import datetime
 import re
 
-ATM_VERSION = "0.9.1"
+ATM_VERSION = "0.9.5"
 MIN_HA_VERSION = "2024.5.0"
+GITHUB_URL = "https://github.com/sfox38/atm"
 DOMAIN = "atm"
 STORAGE_KEY = "atm"
 STORAGE_VERSION = 1

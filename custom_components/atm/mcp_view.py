@@ -701,6 +701,18 @@ def _jsonrpc_result(msg_id: Any, result: Any) -> dict:
     return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
 
+def _sanitize_jsonrpc_id(raw_id: Any) -> str | int | None:
+    """Coerce a JSON-RPC id to a valid type (string, number, or null).
+
+    JSON-RPC 2.0 requires id to be a string, number, or null. If the client
+    sends a dict, list, or other non-conforming type, coerce to None rather
+    than echoing it back.
+    """
+    if raw_id is None or isinstance(raw_id, (str, int, float)):
+        return raw_id
+    return None
+
+
 def _jsonrpc_error(msg_id: Any, code: int, message: str) -> dict:
     """Wrap an error in a JSON-RPC 2.0 error envelope."""
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
@@ -1127,12 +1139,17 @@ async def _tool_create_automation(
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
+    # Validate config but write the original (not the validated result) to YAML.
+    # HA's validator may return internal representations that don't round-trip
+    # through YAML cleanly. HA's own automation UI follows the same pattern:
+    # write the user's config and let automation.reload normalize it.
     try:
         validated = await _validate_automation_config(hass, automation_id, config)
         if validated is None:
             return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "create_automation"
     except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "create_automation"
+        _LOGGER.debug("create_automation validation error: %s", exc)
+        return _tool_error("Automation config validation failed. Check trigger, condition, and action fields."), "invalid_request", "create_automation"
 
     path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
@@ -1146,7 +1163,7 @@ async def _tool_create_automation(
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("create_automation failed: %s", exc)
-        return _tool_error(f"Failed to create automation: {exc}"), "denied", "create_automation"
+        return _tool_error("Failed to create automation. Check HA logs for details."), "denied", "create_automation"
 
     return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", "create_automation"
 
@@ -1177,7 +1194,8 @@ async def _tool_edit_automation(
         if validated is None:
             return _tool_error("Automation config failed validation. Check trigger, condition, and action fields."), "invalid_request", "edit_automation"
     except Exception as exc:
-        return _tool_error(f"Automation config validation error: {exc}"), "invalid_request", "edit_automation"
+        _LOGGER.debug("edit_automation validation error: %s", exc)
+        return _tool_error("Automation config validation failed. Check trigger, condition, and action fields."), "invalid_request", "edit_automation"
 
     path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
     lock = _get_automation_lock(hass)
@@ -1194,7 +1212,7 @@ async def _tool_edit_automation(
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("edit_automation failed: %s", exc)
-        return _tool_error(f"Failed to edit automation: {exc}"), "denied", "edit_automation"
+        return _tool_error("Failed to edit automation. Check HA logs for details."), "denied", "edit_automation"
 
     return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", "edit_automation"
 
@@ -1224,7 +1242,7 @@ async def _tool_delete_automation(
         await hass.services.async_call("automation", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("delete_automation failed: %s", exc)
-        return _tool_error(f"Failed to delete automation: {exc}"), "denied", "delete_automation"
+        return _tool_error("Failed to delete automation. Check HA logs for details."), "denied", "delete_automation"
 
     return _tool_success(f"Automation '{automation_id}' deleted successfully."), "allowed", "delete_automation"
 
@@ -1251,7 +1269,8 @@ async def _tool_create_script(
         if validated is None:
             return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "create_script"
     except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "create_script"
+        _LOGGER.debug("create_script validation error: %s", exc)
+        return _tool_error("Script config validation failed. Check sequence, mode, and field definitions."), "invalid_request", "create_script"
 
     path = hass.config.path(_SCRIPT_CONFIG_PATH)
     lock = _get_script_lock(hass)
@@ -1267,7 +1286,7 @@ async def _tool_create_script(
         await hass.services.async_call("script", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("create_script failed: %s", exc)
-        return _tool_error(f"Failed to create script: {exc}"), "denied", "create_script"
+        return _tool_error("Failed to create script. Check HA logs for details."), "denied", "create_script"
 
     return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "create_script"
 
@@ -1294,7 +1313,8 @@ async def _tool_edit_script(
         if validated is None:
             return _tool_error("Script config failed validation. Check sequence, mode, and field definitions."), "invalid_request", "edit_script"
     except Exception as exc:
-        return _tool_error(f"Script config validation error: {exc}"), "invalid_request", "edit_script"
+        _LOGGER.debug("edit_script validation error: %s", exc)
+        return _tool_error("Script config validation failed. Check sequence, mode, and field definitions."), "invalid_request", "edit_script"
 
     path = hass.config.path(_SCRIPT_CONFIG_PATH)
     lock = _get_script_lock(hass)
@@ -1310,7 +1330,7 @@ async def _tool_edit_script(
         await hass.services.async_call("script", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("edit_script failed: %s", exc)
-        return _tool_error(f"Failed to edit script: {exc}"), "denied", "edit_script"
+        return _tool_error("Failed to edit script. Check HA logs for details."), "denied", "edit_script"
 
     return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "edit_script"
 
@@ -1342,7 +1362,7 @@ async def _tool_delete_script(
         await hass.services.async_call("script", "reload", blocking=True)
     except Exception as exc:
         _LOGGER.error("delete_script failed: %s", exc)
-        return _tool_error(f"Failed to delete script: {exc}"), "denied", "delete_script"
+        return _tool_error("Failed to delete script. Check HA logs for details."), "denied", "delete_script"
 
     return _tool_success(f"Script '{script_id}' deleted successfully."), "allowed", "delete_script"
 
@@ -1504,7 +1524,7 @@ async def _tool_get_live_context(
 ) -> tuple[dict, str, str]:
     """MCP tool: GetLiveContext - return a human-readable summary of accessible entities."""
     text = _build_live_context(token, hass)
-    return _tool_success(json.dumps({"success": True, "result": text})), "allowed", "GetLiveContext"
+    return _tool_success(text), "allowed", "GetLiveContext"
 
 
 async def _tool_get_date_time(
@@ -1524,7 +1544,7 @@ async def _tool_get_date_time(
         "timezone": tz_str,
         "weekday": local.strftime("%A"),
     }
-    return _tool_success(json.dumps({"success": True, "result": result})), "allowed", "GetDateTime"
+    return _tool_success(json.dumps(result)), "allowed", "GetDateTime"
 
 
 def _area_id_from_name(hass: Any, area_name: str) -> str:
@@ -1773,6 +1793,9 @@ async def _tool_hass_set_volume_relative(
         area=args.get("area"),
         floor=args.get("floor"),
     )
+    # Integer step values use sign for direction only; magnitude is discarded.
+    # This mirrors native HA's HassSetVolumeRelative intent handler, which calls
+    # volume_up/volume_down (fixed-increment services, not adjustable-step).
     step = args.get("volume_step")
     if step == "down" or (isinstance(step, int) and step < 0):
         svc = "volume_down"
@@ -2451,10 +2474,11 @@ async def _handle_streamable_batch(
             headers={"X-ATM-Request-ID": request_id},
         )
 
-    # Hard cap: each item in the batch runs concurrently and bypasses the single
-    # rate-limit check done on the outer HTTP request. Without this cap, a client
-    # could send 1000 tool calls in one HTTP request and only consume one rate-limit
-    # token. This is a band-aid - a per-call rate limit would be the proper fix.
+    # Batch rate limiting design: each batch consumes ONE rate-limit token, not one
+    # per item. Per-item counting would let a single 50-item batch exhaust a token's
+    # entire 60 req/min budget, making batching worse than sequential calls. The
+    # MAX_BATCH_ITEMS cap bounds the multiplier to 50x, which is an acceptable
+    # tradeoff for MCP batch usability. Reviewed and accepted in audit 2026-04-19.
     if len(items) > MAX_BATCH_ITEMS:
         return web.Response(
             status=400,
@@ -2465,9 +2489,9 @@ async def _handle_streamable_batch(
 
     async def _dispatch_one(item: Any) -> dict | None:
         if not isinstance(item, dict) or item.get("jsonrpc") != "2.0":
-            msg_id = item.get("id") if isinstance(item, dict) else None
+            msg_id = _sanitize_jsonrpc_id(item.get("id")) if isinstance(item, dict) else None
             return _jsonrpc_error(msg_id, -32600, "Invalid Request.")
-        msg_id = item.get("id")
+        msg_id = _sanitize_jsonrpc_id(item.get("id"))
         method = item.get("method", "")
         params = item.get("params") or {}
         response_msg, _, _, _ = await _dispatch_mcp(
@@ -2626,6 +2650,8 @@ class ATMMcpSseView(HomeAssistantView):
                     except asyncio.TimeoutError:
                         if data.wipe_epoch != session_epoch:
                             break
+                        if data.store.get_settings().kill_switch:
+                            break
                         await response.write(b": heartbeat\n\n")
                         continue
                     if msg is None:
@@ -2696,11 +2722,11 @@ class ATMMcpSseView(HomeAssistantView):
             return web.Response(
                 status=200,
                 content_type="application/json",
-                text=json.dumps(_jsonrpc_error(body.get("id"), -32600, "Invalid Request.")),
+                text=json.dumps(_jsonrpc_error(_sanitize_jsonrpc_id(body.get("id")), -32600, "Invalid Request.")),
                 headers={"X-ATM-Request-ID": request_id},
             )
 
-        msg_id = body.get("id")
+        msg_id = _sanitize_jsonrpc_id(body.get("id"))
         method = body.get("method", "")
         params = body.get("params") or {}
 
@@ -2763,7 +2789,7 @@ class ATMMcpMessagesView(HomeAssistantView):
         if body.get("jsonrpc") != "2.0":
             if body.get("id") is not None:
                 try:
-                    queue.put_nowait(_jsonrpc_error(body.get("id"), -32600, "Invalid Request."))
+                    queue.put_nowait(_jsonrpc_error(_sanitize_jsonrpc_id(body.get("id")), -32600, "Invalid Request."))
                 except asyncio.QueueFull:
                     return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
             return web.Response(
@@ -2771,7 +2797,7 @@ class ATMMcpMessagesView(HomeAssistantView):
                 headers={"X-ATM-Request-ID": request_id},
             )
 
-        msg_id = body.get("id")
+        msg_id = _sanitize_jsonrpc_id(body.get("id"))
         method = body.get("method", "")
         params = body.get("params") or {}
 

@@ -1,6 +1,6 @@
 export type NodeState = "GREY" | "YELLOW" | "GREEN" | "RED";
 export type Permission = "WRITE" | "READ" | "DENY" | "NO_ACCESS" | "NOT_FOUND";
-export type Outcome = "allowed" | "denied" | "not_found" | "rate_limited" | "not_implemented";
+export type Outcome = "allowed" | "denied" | "not_found" | "rate_limited" | "not_implemented" | "invalid_request";
 
 export interface PermissionNode {
   state: NodeState;

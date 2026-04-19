@@ -31,12 +31,12 @@ export function PassThroughNotice({ token, onUpdate }: Props) {
     <div>
       <div className="pass-through-header-banner">
         <p>
-          <strong style={{ color: "var(--warning-color, #ff9800)" }}>Pass Through token.</strong> This token bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked.
+          <strong className="text-warning">Pass Through token.</strong> This token bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked.
         </p>
-        <p style={{ marginTop: 8 }}>
+        <p className="mt-8">
           The flags for restarting Home Assistant, controlling physical devices (locks and alarms), writing automations, writing scripts, and reading logs must still be individually enabled below.
         </p>
-        <p style={{ marginTop: 8 }}>
+        <p className="mt-8">
           This token works only with HTTP-based MCP clients (such as Claude Code with <code>--transport http</code>). It cannot be used with stdio-based MCP server setups.
         </p>
       </div>
@@ -51,11 +51,11 @@ export function PassThroughNotice({ token, onUpdate }: Props) {
           Convert to Scoped
         </button>
       ) : (
-        <div className="card" style={{ margin: 0 }}>
-          <p style={{ margin: "0 0 12px" }}>
+        <div className="card pass-through-convert-card">
+          <p className="pass-through-convert-body">
             Converting to scoped will immediately apply the stored permission tree. The permission tree will be empty unless grants were previously configured, meaning the token will have no access until you add grants.
           </p>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="pass-through-actions">
             <button
               className="btn btn-primary"
               onClick={convertToScoped}

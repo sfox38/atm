@@ -34,11 +34,19 @@ const OUTCOME_CLASS: Record<Outcome, string> = {
   not_implemented: "outcome-not_implemented",
 };
 
+type SortKey = "timestamp" | "token_name" | "method" | "resource" | "outcome" | "client_ip";
+type SortDir = "asc" | "desc";
+
+function SortArrow({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  const active = col === sortKey;
+  return <span className={`sort-arrow${active ? " active" : ""}`}>{active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span>;
+}
+
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--divider-color, #e0e0e0)" }}>
-      <span style={{ width: 88, flexShrink: 0, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary-text-color, #9e9e9e)", paddingTop: 1 }}>{label}</span>
-      <span style={{ fontSize: 13, wordBreak: "break-all", fontFamily: mono ? "monospace" : undefined }}>{value}</span>
+    <div className="detail-row">
+      <span className="detail-label">{label}</span>
+      <span className={mono ? "detail-value-mono" : "detail-value"}>{value}</span>
     </div>
   );
 }
@@ -47,7 +55,7 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title" style={{ marginBottom: 12 }}>Audit Entry</h3>
+        <h3 className="modal-title audit-section-title">Audit Entry</h3>
         <DetailRow label="Time" value={formatTs(entry.timestamp)} />
         <DetailRow label="Token" value={entry.token_name} />
         <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
@@ -66,21 +74,43 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
 
 export function AuditTable({ entries, loading, page, pageSize, onPageChange }: Props) {
   const [selected, setSelected] = useState<AuditEntry | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("timestamp");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   if (loading) {
     return <div className="loading-wrap"><div className="spinner" /><span>Loading...</span></div>;
   }
 
   if (entries.length === 0) {
-    return (
-      <p style={{ color: "var(--secondary-text-color, #9e9e9e)", fontSize: 13 }}>
-        No audit entries found.
-      </p>
-    );
+    return <p className="audit-empty">No audit entries found.</p>;
   }
 
-  const totalPages = Math.ceil(entries.length / pageSize);
-  const slice = entries.slice(page * pageSize, page * pageSize + pageSize);
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  }
+
+  const sorted = [...entries].sort((a, b) => {
+    const va = a[sortKey] ?? "";
+    const vb = b[sortKey] ?? "";
+    if (va < vb) return sortDir === "asc" ? -1 : 1;
+    if (va > vb) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sorted.length / pageSize);
+  const slice = sorted.slice(page * pageSize, page * pageSize + pageSize);
+
+  function th(label: string, key: SortKey) {
+    return (
+      <th
+        className={`sortable${sortKey === key ? " sort-active" : ""}`}
+        onClick={() => handleSort(key)}
+      >
+        {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+      </th>
+    );
+  }
 
   return (
     <div>
@@ -88,13 +118,12 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
       <table className="data-table audit-table">
         <thead>
           <tr>
-            <th>Request ID</th>
-            <th>Time</th>
-            <th>Token</th>
-            <th>Method</th>
-            <th>Resource</th>
-            <th>Outcome</th>
-            <th>IP</th>
+            {th("Outcome", "outcome")}
+            {th("Token", "token_name")}
+            {th("Time", "timestamp")}
+            {th("Method", "method")}
+            {th("Resource", "resource")}
+            {th("IP", "client_ip")}
           </tr>
         </thead>
         <tbody>
@@ -104,35 +133,19 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
               className={`clickable${entry.pass_through ? " pass-through-row" : ""}`}
               onClick={() => setSelected(entry)}
             >
-              <td
-                style={{ fontFamily: "monospace", fontSize: 11 }}
-                title={entry.request_id}
-              >
-                {entry.request_id.slice(0, 8)}...
+              <td>
+                <span className={`outcome-badge ${OUTCOME_CLASS[entry.outcome]}`}>
+                  {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
+                </span>
               </td>
+              <td title={entry.token_name}>{entry.token_name.replace(/^(admin):(.+)$/, "$1 ($2)")}</td>
               <td>
                 <span className="audit-time-full">{formatTs(entry.timestamp)}</span>
                 <span className="audit-time-short">{formatTsShort(entry.timestamp)}</span>
               </td>
-              <td title={entry.token_name}>{entry.token_name.replace(/^(admin):(.+)$/, "$1 ($2)")}</td>
-              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{entry.method}</td>
-              <td
-                style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={entry.resource}
-              >
-                {entry.resource}
-              </td>
-              <td>
-                <span className={OUTCOME_CLASS[entry.outcome]}>
-                  {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
-                </span>
-              </td>
-              <td
-                style={{ fontFamily: "monospace", fontSize: 12 }}
-                title={entry.client_ip}
-              >
-                {entry.client_ip}
-              </td>
+              <td className="audit-cell-method">{entry.method}</td>
+              <td className="audit-cell-resource" title={entry.resource}>{entry.resource}</td>
+              <td className="audit-cell-ip" title={entry.client_ip}>{entry.client_ip}</td>
             </tr>
           ))}
         </tbody>

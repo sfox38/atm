@@ -1,0 +1,946 @@
+/* ATM Panel - main stylesheet
+   Injected into the shadow DOM at runtime via index.tsx.
+   Edit this file to update the panel's visual design.
+   Run "npm run build" to compile changes into the JS bundle.
+*/
+
+/* ============================================================
+   Design tokens - light mode (default)
+   ============================================================ */
+:host {
+  --atm-bg:           #fdf6ec;
+  --atm-surface:      #ffffff;
+  --atm-surface-2:    #faf7f2;
+  --atm-accent:       #d97706;
+  --atm-accent-hov:   #b45309;
+  --atm-accent-lt:    #fef3c7;
+  --atm-accent-fg:    #ffffff;
+  --atm-text:         #1c1917;
+  --atm-text-2:       #78716c;
+  --atm-border:       #e7e5e4;
+  --atm-divider:      #f5f5f4;
+  --atm-success:      #16a34a;
+  --atm-success-bg:   rgba(22,163,74,0.1);
+  --atm-error:        #dc2626;
+  --atm-error-bg:     rgba(220,38,38,0.1);
+  --atm-warning:      #d97706;
+  --atm-warning-bg:   rgba(217,119,6,0.1);
+  --atm-info:         #2563eb;
+  --atm-info-bg:      rgba(37,99,235,0.08);
+  --atm-shadow:       0 1px 3px rgba(120,80,0,0.08), 0 1px 2px rgba(120,80,0,0.05);
+  --atm-shadow-md:    0 4px 16px rgba(120,80,0,0.1), 0 2px 6px rgba(120,80,0,0.06);
+  --atm-shadow-lg:    0 8px 32px rgba(0,0,0,0.18);
+  --atm-radius:       12px;
+  --atm-radius-sm:    8px;
+  --atm-radius-xs:    6px;
+
+  display: block;
+  height: 100%;
+  position: relative;
+  touch-action: pan-y;
+  background: var(--atm-bg);
+  color: var(--atm-text);
+  font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Dark vars shared between auto and forced-dark */
+@media (prefers-color-scheme: dark) {
+  :host:not(.atm-theme-light) {
+    --atm-bg:           #1c1917;
+    --atm-surface:      #292524;
+    --atm-surface-2:    #211f1d;
+    --atm-accent:       #f59e0b;
+    --atm-accent-hov:   #fbbf24;
+    --atm-accent-lt:    #3d2806;
+    --atm-accent-fg:    #1c1917;
+    --atm-text:         #fafaf9;
+    --atm-text-2:       #a8a29e;
+    --atm-border:       #44403c;
+    --atm-divider:      #292524;
+    --atm-success:      #4ade80;
+    --atm-success-bg:   rgba(74,222,128,0.12);
+    --atm-error:        #f87171;
+    --atm-error-bg:     rgba(248,113,113,0.12);
+    --atm-warning:      #fbbf24;
+    --atm-warning-bg:   rgba(251,191,36,0.12);
+    --atm-info:         #60a5fa;
+    --atm-info-bg:      rgba(96,165,250,0.1);
+    --atm-shadow:       0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+    --atm-shadow-md:    0 4px 16px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.4);
+    --atm-shadow-lg:    0 8px 32px rgba(0,0,0,0.6);
+  }
+}
+
+/* Forced dark (overrides system light preference) */
+:host(.atm-theme-dark) {
+  --atm-bg:           #1c1917;
+  --atm-surface:      #292524;
+  --atm-surface-2:    #211f1d;
+  --atm-accent:       #f59e0b;
+  --atm-accent-hov:   #fbbf24;
+  --atm-accent-lt:    #3d2806;
+  --atm-accent-fg:    #1c1917;
+  --atm-text:         #fafaf9;
+  --atm-text-2:       #a8a29e;
+  --atm-border:       #44403c;
+  --atm-divider:      #292524;
+  --atm-success:      #4ade80;
+  --atm-success-bg:   rgba(74,222,128,0.12);
+  --atm-error:        #f87171;
+  --atm-error-bg:     rgba(248,113,113,0.12);
+  --atm-warning:      #fbbf24;
+  --atm-warning-bg:   rgba(251,191,36,0.12);
+  --atm-info:         #60a5fa;
+  --atm-info-bg:      rgba(96,165,250,0.1);
+  --atm-shadow:       0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --atm-shadow-md:    0 4px 16px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.4);
+  --atm-shadow-lg:    0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* Forced light: :host defaults above apply; :not(.atm-theme-light) in media
+   query ensures system-dark preference does not override it */
+
+* { box-sizing: border-box; }
+
+/* ============================================================
+   Shell
+   ============================================================ */
+.atm-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--atm-bg);
+}
+
+.atm-header {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 16px;
+  background: var(--atm-surface);
+  border-bottom: 1px solid var(--atm-border);
+  flex-shrink: 0;
+}
+.atm-header-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--atm-text);
+  margin-left: 8px;
+  letter-spacing: -0.01em;
+}
+
+/* ============================================================
+   Tab bar
+   ============================================================ */
+.atm-tabs {
+  display: flex;
+  align-items: stretch;
+  background: var(--atm-surface);
+  border-bottom: 2px solid var(--atm-border);
+  padding: 0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.atm-tab {
+  padding: 0 20px;
+  height: 50px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--atm-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.atm-tab:hover { color: var(--atm-accent); background: var(--atm-accent-lt); }
+.atm-tab.active { color: var(--atm-accent); border-bottom-color: var(--atm-accent); }
+.atm-tab-spacer { flex: 1; }
+
+.atm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+/* ============================================================
+   Main content
+   ============================================================ */
+.atm-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px 20px;
+  touch-action: pan-y;
+}
+.view-root { padding-top: 20px; }
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.card {
+  background: var(--atm-surface);
+  border-radius: var(--atm-radius);
+  box-shadow: var(--atm-shadow);
+  border: 1px solid var(--atm-border);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card-header {
+  font-size: 11px;
+  font-weight: 700;
+  margin: 0 0 16px 0;
+  color: var(--atm-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--atm-radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+  white-space: nowrap;
+  line-height: 1;
+  font-family: inherit;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--atm-accent); color: var(--atm-accent-fg); }
+.btn-primary:hover:not(:disabled) { background: var(--atm-accent-hov); box-shadow: var(--atm-shadow-md); }
+.btn-danger { background: var(--atm-error); color: #fff; }
+.btn-danger:hover:not(:disabled) { opacity: 0.85; box-shadow: var(--atm-shadow-md); }
+.btn-outline {
+  background: transparent;
+  color: var(--atm-accent);
+  border: 1.5px solid var(--atm-accent);
+}
+.btn-outline:hover:not(:disabled) { background: var(--atm-accent-lt); }
+.btn-text {
+  background: transparent;
+  color: var(--atm-accent);
+  padding: 6px 10px;
+  border-radius: var(--atm-radius-xs);
+}
+.btn-text:hover:not(:disabled) { background: var(--atm-accent-lt); }
+.btn-ghost {
+  background: transparent;
+  color: var(--atm-text-2);
+  padding: 6px 10px;
+  border-radius: var(--atm-radius-xs);
+  border: 1px solid var(--atm-border);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--atm-surface-2); color: var(--atm-text); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-icon { padding: 6px 8px; }
+.btn-warning { background: var(--atm-warning); color: var(--atm-accent-fg); }
+.btn-warning:hover:not(:disabled) { background: var(--atm-accent-hov); }
+.btn-text-danger { color: var(--atm-error); }
+.btn-text-warning { color: var(--atm-warning); }
+.btn-text-danger:hover:not(:disabled) { background: var(--atm-error-bg); }
+.btn-text-warning:hover:not(:disabled) { background: var(--atm-warning-bg); }
+
+/* Header Create Token button - slightly larger */
+.btn-header-create {
+  padding: 9px 20px;
+  font-size: 14px;
+}
+
+/* ============================================================
+   Badges
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.badge-blue   { background: var(--atm-info-bg);    color: var(--atm-info); }
+.badge-amber  { background: var(--atm-warning-bg); color: var(--atm-warning); }
+.badge-green  { background: var(--atm-success-bg); color: var(--atm-success); }
+.badge-red    { background: var(--atm-error-bg);   color: var(--atm-error); }
+.badge-grey   { background: rgba(0,0,0,0.07);      color: var(--atm-text-2); }
+
+/* ============================================================
+   Tables
+   ============================================================ */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--atm-text-2);
+  border-bottom: 2px solid var(--atm-border);
+  white-space: nowrap;
+  user-select: none;
+}
+.data-table th.sortable { cursor: pointer; }
+.data-table th.sortable:hover { color: var(--atm-accent); }
+.data-table th.sort-active { color: var(--atm-accent); }
+.sort-arrow { display: inline-block; margin-left: 3px; font-size: 9px; opacity: 0.35; }
+.sort-arrow.active { opacity: 1; }
+.data-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--atm-divider);
+  vertical-align: middle;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tbody tr { transition: background 0.12s; }
+.data-table tbody tr.clickable { cursor: pointer; }
+.data-table tbody tr.clickable:hover { background: var(--atm-accent-lt); }
+.data-table tbody tr.pass-through-row { background: rgba(217,119,6,0.04); }
+.data-table tbody tr.pass-through-row.clickable:hover { background: var(--atm-accent-lt); }
+.audit-table tbody tr:nth-child(even) { background: var(--atm-surface-2); }
+.audit-table tbody tr:nth-child(even).clickable:hover { background: var(--atm-accent-lt); }
+
+/* ============================================================
+   Inputs and selects
+   ============================================================ */
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--atm-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.input {
+  padding: 9px 12px;
+  border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm);
+  background: var(--atm-surface);
+  color: var(--atm-text);
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+}
+.input:focus { outline: none; border-color: var(--atm-accent); box-shadow: 0 0 0 3px rgba(217,119,6,0.15); }
+.input:disabled { opacity: 0.5; cursor: not-allowed; }
+.input.error { border-color: var(--atm-error); }
+.field-error { font-size: 12px; color: var(--atm-error); }
+select.input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+.input-auto { flex: 0 0 auto; width: auto; }
+
+/* ============================================================
+   Toggle switches
+   ============================================================ */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.toggle-switch.disabled { cursor: not-allowed; opacity: 0.45; }
+.toggle-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--atm-border);
+  border-radius: 24px;
+  transition: background 0.2s;
+  pointer-events: none;
+}
+.toggle-switch-track::before {
+  content: "";
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.toggle-switch input:checked + .toggle-switch-track { background: var(--atm-accent); }
+.toggle-switch input:checked + .toggle-switch-track::before { transform: translateX(20px); }
+.toggle-switch-danger input:checked + .toggle-switch-track { background: var(--atm-error); }
+
+/* ============================================================
+   Toggle row
+   ============================================================ */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--atm-divider);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-label { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.toggle-label span { font-size: 14px; font-weight: 500; }
+.toggle-label small { font-size: 12px; color: var(--atm-text-2); line-height: 1.4; }
+.toggle-label-master { font-weight: 700; }
+.toggle-row-plain { border: none; padding: 0; }
+.toggle-row-greyed { opacity: 0.45; pointer-events: none; }
+
+/* Theme toggle segmented control */
+.theme-toggle {
+  display: flex;
+  border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.theme-toggle-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-right: 1px solid var(--atm-border);
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--atm-text-2);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.theme-toggle-btn:last-child { border-right: none; }
+.theme-toggle-btn:hover { background: var(--atm-accent-lt); color: var(--atm-accent); }
+.theme-toggle-btn.active { background: var(--atm-accent); color: var(--atm-accent-fg); }
+
+/* ============================================================
+   Modal
+   ============================================================ */
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: var(--atm-surface);
+  border-radius: var(--atm-radius);
+  box-shadow: var(--atm-shadow-lg);
+  border: 1px solid var(--atm-border);
+  padding: 28px;
+  max-width: 560px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-title { font-size: 18px; font-weight: 700; margin: 0 0 20px 0; color: var(--atm-text); }
+.modal-title-error { color: var(--atm-error); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* ============================================================
+   Warning / info blocks
+   ============================================================ */
+.amber-block {
+  background: var(--atm-warning-bg);
+  border: 1px solid var(--atm-warning);
+  border-radius: var(--atm-radius-sm);
+  padding: 14px 16px;
+  margin: 12px 0;
+}
+.amber-block p { margin: 0; font-size: 13px; line-height: 1.5; }
+.amber-block strong { color: var(--atm-warning); }
+.pass-through-header-banner {
+  background: var(--atm-warning-bg);
+  border: 1px solid var(--atm-warning);
+  border-radius: var(--atm-radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.pass-through-header-banner p { margin: 3px 0; font-size: 13px; }
+
+/* ============================================================
+   Banners
+   ============================================================ */
+.banner { padding: 12px 16px; border-radius: var(--atm-radius-sm); font-size: 13px; margin-bottom: 14px; border-left: 4px solid; }
+.banner-warn  { background: var(--atm-warning-bg); border-color: var(--atm-warning); color: var(--atm-text); }
+.banner-info  { background: var(--atm-info-bg);    border-color: var(--atm-info);    color: var(--atm-text); }
+.banner-error { background: var(--atm-error-bg);   border-color: var(--atm-error);   color: var(--atm-error); }
+
+/* ============================================================
+   Timestamps
+   ============================================================ */
+.audit-time-short { display: none; }
+.audit-time-full  { display: inline; }
+
+/* ============================================================
+   Two-column layout
+   ============================================================ */
+.two-col { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; }
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: minmax(0,1fr); }
+  .two-col > *:first-child { order: 2; }
+  .two-col > *:last-child  { order: 1; }
+}
+
+/* Settings two-column layout */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+  align-items: start;
+}
+@media (max-width: 768px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+/* ============================================================
+   Responsive / mobile
+   ============================================================ */
+@media (max-width: 600px) {
+  .atm-content { padding: 0 10px 16px; }
+  .card { padding: 14px; overflow-x: hidden; }
+  .atm-tab { padding: 0 12px; font-size: 11px; letter-spacing: 0.04em; }
+  .atm-header-action-label { display: none; }
+
+  .tree-badge, .tree-effective, .tree-hint-link { display: none; }
+  .tree-children { padding-left: 12px; }
+  .tree-node { gap: 6px; }
+
+  .token-table th:nth-child(4), .token-table th:nth-child(5),
+  .token-table th:nth-child(6), .token-table th:nth-child(7),
+  .token-table td:nth-child(4), .token-table td:nth-child(5),
+  .token-table td:nth-child(6), .token-table td:nth-child(7) { display: none; }
+  .token-table th, .token-table td { padding: 6px 4px; }
+  .token-table td:nth-child(1) { word-break: break-all; }
+
+  .archived-table th:nth-child(4), .archived-table th:nth-child(5), .archived-table th:nth-child(7),
+  .archived-table td:nth-child(4), .archived-table td:nth-child(5), .archived-table td:nth-child(7) { display: none; }
+  .archived-table th, .archived-table td { padding: 6px 4px; }
+  .archived-table td:nth-child(1) { word-break: break-all; }
+
+  .audit-table { table-layout: fixed; }
+  .audit-table th:nth-child(1), .audit-table th:nth-child(4),
+  .audit-table th:nth-child(5), .audit-table th:nth-child(7),
+  .audit-table td:nth-child(1), .audit-table td:nth-child(4),
+  .audit-table td:nth-child(5), .audit-table td:nth-child(7) { display: none; }
+  .audit-table th, .audit-table td { padding: 6px 4px; }
+  .audit-table th:nth-child(2), .audit-table td:nth-child(2) { width: 30%; }
+  .audit-table th:nth-child(6), .audit-table td:nth-child(6) { width: 24%; }
+  .audit-table td:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .audit-time-full { display: none; }
+  .audit-time-short { display: inline; white-space: nowrap; }
+
+  .token-detail-sticky { margin: 0 -10px; padding: 12px 10px 10px; }
+  .token-card-body { flex-direction: column; }
+  .token-card-actions { min-width: auto; width: 100%; flex-direction: row; flex-wrap: wrap; }
+  .token-action-btn { flex: 1; min-width: 120px; }
+}
+
+/* ============================================================
+   Permission state colors
+   ============================================================ */
+.state-GREY   { color: var(--atm-text-2); }
+.state-YELLOW { color: var(--atm-warning); }
+.state-GREEN  { color: var(--atm-success); }
+.state-RED    { color: var(--atm-error); }
+
+/* ============================================================
+   Permission selector
+   ============================================================ */
+.perm-selector {
+  display: inline-flex;
+  border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.perm-btn {
+  padding: 4px 8px;
+  border: none;
+  touch-action: none;
+  border-right: 1px solid var(--atm-border);
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--atm-text-2);
+  transition: background 0.12s, color 0.12s;
+  min-width: 28px;
+  text-align: center;
+}
+.perm-btn:last-child { border-right: none; }
+.perm-btn:hover { background: var(--atm-accent-lt); }
+.perm-btn.active-GREY   { background: rgba(0,0,0,0.07);        color: var(--atm-text-2); }
+.perm-btn.active-YELLOW { background: var(--atm-warning-bg);   color: var(--atm-warning); }
+.perm-btn.active-GREEN  { background: var(--atm-success-bg);   color: var(--atm-success); }
+.perm-btn.active-RED    { background: var(--atm-error-bg);     color: var(--atm-error); }
+
+/* ============================================================
+   Entity tree
+   ============================================================ */
+.tree-filter { margin-bottom: 12px; display: flex; gap: 8px; }
+.tree-node { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--atm-radius-xs); transition: background 0.12s; }
+.tree-node:hover { background: var(--atm-accent-lt); }
+.tree-expand {
+  width: 20px; height: 20px; border: none; background: none; cursor: pointer;
+  color: var(--atm-text-2); font-size: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; padding: 0;
+}
+.tree-expand:hover { background: var(--atm-accent-lt); }
+.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-entity-id { font-size: 12px; color: var(--atm-text-2); }
+.tree-friendly { font-size: 13px; }
+.tree-effective { font-size: 11px; color: var(--atm-text-2); white-space: nowrap; }
+.tree-children { padding-left: 20px; }
+.tree-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+.tree-badge-dynamic { background: var(--atm-info-bg);    color: var(--atm-info); }
+.tree-badge-risk    { background: var(--atm-error-bg);   color: var(--atm-error); }
+.tree-badge-ghost   { background: var(--atm-warning-bg); color: var(--atm-warning); }
+.tree-hint-link { font-size: 11px; color: var(--atm-accent); cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; white-space: nowrap; }
+.tree-hint-input {
+  font-size: 12px; padding: 2px 8px;
+  border: 1.5px solid var(--atm-border); border-radius: var(--atm-radius-xs);
+  background: var(--atm-surface); color: var(--atm-text); width: 120px; font-family: inherit;
+}
+.tree-hint-input:focus { outline: none; border-color: var(--atm-accent); }
+
+/* ============================================================
+   Loading spinner
+   ============================================================ */
+.loading-wrap { display: flex; align-items: center; justify-content: center; padding: 48px; color: var(--atm-text-2); gap: 12px; }
+.spinner {
+  width: 24px; height: 24px;
+  border: 3px solid var(--atm-border); border-top-color: var(--atm-accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   Filter row
+   ============================================================ */
+.filter-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: nowrap; align-items: center; overflow: hidden; }
+.filter-row .input:not(.input-auto) { flex: 1 1 0; min-width: 80px; width: auto; }
+.filter-row .input-auto { flex: 0 0 auto; }
+.filter-row-right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+/* ============================================================
+   Section header
+   ============================================================ */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--atm-text-2); }
+
+/* ============================================================
+   Token display (rotated modal)
+   ============================================================ */
+.token-display {
+  font-family: "Roboto Mono", monospace; font-size: 13px;
+  background: var(--atm-surface-2); border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm); padding: 14px; word-break: break-all;
+  user-select: all; margin: 14px 0; line-height: 1.6;
+}
+
+/* ============================================================
+   Outcome coloring and badges
+   ============================================================ */
+.outcome-allowed       { color: var(--atm-success); font-weight: 600; }
+.outcome-denied        { color: var(--atm-error);   font-weight: 600; }
+.outcome-not_found     { color: var(--atm-text-2);  font-weight: 500; }
+.outcome-rate_limited  { color: var(--atm-warning); font-weight: 600; }
+.outcome-not_implemented { color: var(--atm-info);  font-weight: 500; }
+
+.outcome-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.outcome-badge.outcome-allowed       { background: var(--atm-success-bg); }
+.outcome-badge.outcome-denied        { background: var(--atm-error-bg); }
+.outcome-badge.outcome-not_found     { background: rgba(0,0,0,0.06); }
+.outcome-badge.outcome-rate_limited  { background: var(--atm-warning-bg); }
+.outcome-badge.outcome-not_implemented { background: var(--atm-info-bg); }
+
+/* ============================================================
+   Permission summary
+   ============================================================ */
+.perm-summary { font-family: "Roboto Mono", monospace; font-size: 12px; }
+.perm-summary-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--atm-divider); }
+.perm-summary-row:last-child { border-bottom: none; }
+.perm-summary-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; font-family: "Roboto Mono", monospace; }
+.perm-summary-th { cursor: pointer; user-select: none; color: var(--atm-text-2); white-space: nowrap; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 8px; border-bottom: 2px solid var(--atm-border); text-align: left; }
+.perm-summary-th.active { color: var(--atm-accent); }
+.perm-summary-arrow { font-size: 9px; opacity: 0.35; }
+.perm-summary-arrow.active { opacity: 1; }
+.perm-summary-tr { border-bottom: 1px solid var(--atm-divider); }
+.perm-summary-td         { padding: 5px 8px; white-space: nowrap; }
+.perm-summary-td-name    { padding: 5px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perm-summary-td-id      { padding: 5px 8px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--atm-text-2); }
+.perm-summary-td-name.clickable, .perm-summary-td-id.clickable { cursor: pointer; text-decoration: underline dotted; }
+.perm-summary-empty { color: var(--atm-text-2); font-size: 13px; margin: 0; }
+
+.perm-type-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.perm-type-domain { background: var(--atm-info-bg);    color: var(--atm-info); }
+.perm-type-device { background: rgba(156,39,176,0.1);  color: #9c27b0; }
+.perm-type-entity { background: rgba(0,0,0,0.07);      color: var(--atm-text-2); }
+
+/* ============================================================
+   Permission simulator
+   ============================================================ */
+.epe-card { height: 280px; overflow: hidden; }
+.sim-path { font-size: 13px; background: var(--atm-surface-2); border-radius: var(--atm-radius-sm); padding: 12px 14px; font-family: "Roboto Mono", monospace; margin-top: 10px; border: 1px solid var(--atm-border); }
+.sim-step { margin: 2px 0; }
+.sim-loading { font-size: 12px; color: var(--atm-text-2); margin-top: 6px; }
+.sim-resolution-level { color: var(--atm-text-2); }
+.sim-result { margin-top: 8px; font-weight: 600; }
+
+/* ============================================================
+   Checkbox row (confirmation dialogs)
+   ============================================================ */
+.checkbox-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; cursor: pointer; }
+.checkbox-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 1px; flex-shrink: 0; cursor: pointer; accent-color: var(--atm-accent); }
+.checkbox-row span { font-size: 13px; line-height: 1.4; }
+.checkbox-warning { accent-color: var(--atm-warning); }
+
+/* ============================================================
+   Token detail stat row (legacy, kept for RotatedTokenModal)
+   ============================================================ */
+.stat-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.stat-item { display: flex; flex-direction: column; gap: 3px; }
+.stat-label { font-size: 10px; color: var(--atm-text-2); text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; }
+.stat-value { font-size: 14px; font-weight: 600; }
+.stat-value-sm { font-size: 13px; }
+
+/* ============================================================
+   Kill switch
+   ============================================================ */
+.kill-switch-active { background: var(--atm-error-bg); border: 1.5px solid var(--atm-error); border-radius: var(--atm-radius-sm); padding: 14px 16px; }
+.kill-switch-label { font-weight: 600; }
+.kill-switch-label-active { font-weight: 600; color: var(--atm-error); }
+
+/* ============================================================
+   Pagination
+   ============================================================ */
+.pagination { display: flex; align-items: center; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+.pagination span { font-size: 13px; color: var(--atm-text-2); }
+
+/* ============================================================
+   Audit detail modal rows
+   ============================================================ */
+.detail-row { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--atm-divider); }
+.detail-label { width: 90px; flex-shrink: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--atm-text-2); padding-top: 1px; }
+.detail-value { font-size: 13px; word-break: break-all; }
+.detail-value-mono { font-size: 13px; word-break: break-all; font-family: monospace; }
+
+/* ============================================================
+   Audit table
+   ============================================================ */
+.audit-section-title { margin-bottom: 12px; }
+.audit-empty { color: var(--atm-text-2); font-size: 13px; }
+.audit-cell-reqid    { font-family: monospace; font-size: 11px; color: var(--atm-text-2); }
+.audit-cell-method   { font-family: monospace; font-size: 12px; }
+.audit-cell-resource { font-family: monospace; font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-cell-ip       { font-family: monospace; font-size: 12px; }
+
+/* ============================================================
+   Token list
+   ============================================================ */
+.token-list-actions { display: flex; gap: 8px; }
+.token-table-empty { text-align: center; color: var(--atm-text-2); padding: 24px; }
+.token-name { font-weight: 600; }
+.row-actions { display: flex; gap: 4px; }
+.archived-toggle-section { margin-top: 8px; }
+.archived-empty { color: var(--atm-text-2); font-size: 13px; }
+
+/* ============================================================
+   Token create modal
+   ============================================================ */
+.token-create-expiry-row { display: flex; gap: 8px; }
+.token-create-expiry-value { width: 80px; }
+.token-create-rate-section { margin-top: 14px; }
+.token-create-rate-fields { display: flex; gap: 12px; flex-wrap: wrap; }
+.token-create-rate-field { margin: 0; flex: 1; }
+
+/* ============================================================
+   Token detail - sticky layout
+   ============================================================ */
+.token-detail-wrap { display: flex; flex-direction: column; }
+.token-detail-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--atm-bg);
+  margin: 0 -20px;
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--atm-border);
+  box-shadow: 0 2px 8px rgba(120,80,0,0.07);
+}
+.token-detail-body { padding-top: 16px; }
+
+/* Token info card - colored header */
+.token-info-card { overflow: hidden; }
+.token-card-header {
+  background: var(--atm-accent-lt);
+  border-radius: var(--atm-radius) var(--atm-radius) 0 0;
+  border-bottom: 1px solid var(--atm-border);
+  margin: -20px -20px 20px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.token-card-name-row { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.token-card-icon { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
+.token-card-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--atm-accent-hov);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  line-height: 1.3;
+}
+.token-card-badges {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* Body: left meta + right actions */
+.token-card-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.token-card-meta { flex: 1; min-width: 0; }
+.token-meta-table {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 14px;
+  align-items: baseline;
+}
+.token-meta-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--atm-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.token-meta-value { font-size: 13px; color: var(--atm-text); }
+
+/* Right action buttons column */
+.token-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  flex-shrink: 0;
+}
+.token-action-btn { width: 100%; }
+.token-confirm-inline { }
+.token-confirm-text { font-size: 11px; color: var(--atm-text-2); margin: 0 0 5px; }
+.token-confirm-btns { display: flex; gap: 4px; }
+
+/* Pass-through confirmation section */
+.token-card-pt-section { margin-top: 16px; border-top: 1px solid var(--atm-border); padding-top: 4px; }
+
+.token-header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.inline-confirm { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.inline-confirm-text { font-size: 13px; }
+.pt-enable-actions { margin-top: 10px; display: flex; gap: 8px; }
+.tree-header-actions { display: flex; gap: 6px; }
+.clear-perms-body { font-size: 14px; margin: 0 0 12px; }
+
+/* ============================================================
+   Pass-through notice
+   ============================================================ */
+.pass-through-convert-card { margin: 0; }
+.pass-through-convert-body { margin: 0 0 12px; }
+.pass-through-actions { display: flex; gap: 8px; }
+
+/* ============================================================
+   Area picker
+   ============================================================ */
+.area-picker-summary { font-size: 13px; color: var(--atm-text-2); margin: 0 0 12px; }
+.area-picker-progress { font-size: 13px; margin: 0; }
+
+/* ============================================================
+   Rate limit config
+   ============================================================ */
+.rate-limit-row { display: flex; gap: 12px; }
+.rate-limit-row .field { flex: 1 1 0; margin: 0; }
+.rate-limit-disabled-text { margin: 8px 0 0; font-size: 12px; color: var(--atm-text-2); }
+
+/* ============================================================
+   Settings
+   ============================================================ */
+.settings-divider { border: none; border-top: 1px solid var(--atm-divider); margin: 10px 0; }
+.settings-toggle-mt { margin-top: 8px; }
+.settings-info-list { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.settings-info-link { color: var(--atm-accent); }
+.settings-info-note { font-size: 13px; color: var(--atm-text-2); }
+.settings-danger-header { color: var(--atm-error); }
+.settings-version { text-align: right; font-size: 11px; color: var(--atm-text-2); margin-top: 8px; opacity: 0.6; }
+.settings-theme-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--atm-text-2); }
+
+/* ============================================================
+   Entity tree extras
+   ============================================================ */
+.hint-input-row { display: flex; gap: 4px; align-items: center; }
+.tree-spacer { width: 20px; flex-shrink: 0; }
+.tree-cursor-pointer { cursor: pointer; }
+.tree-device-indent { padding-left: 26px; }
+.tree-domain-group { margin-bottom: 4px; }
+.tree-domain-label { font-weight: 600; }
+.tree-orphan-label { color: var(--atm-text-2); font-size: 12px; }
+
+/* ============================================================
+   Utility
+   ============================================================ */
+.mt-6  { margin-top: 6px; }
+.mt-8  { margin-top: 8px; }
+.mt-10 { margin-top: 10px; }
+.mt-12 { margin-top: 12px; }
+.mb-8  { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+.text-error   { color: var(--atm-error); }
+.text-warning { color: var(--atm-warning); }
+
+.reload-btn { background: none; border: 1px solid var(--atm-border); border-radius: var(--atm-radius-xs); cursor: pointer; padding: 4px 8px; font-size: 12px; color: var(--atm-text-2); transition: background 0.12s; }
+.reload-btn:hover { background: var(--atm-surface-2); }

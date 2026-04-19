@@ -2,13 +2,42 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { ResolveResult } from "../types";
 import { api } from "../api";
 
+type ResolveDepth = "entity" | "device" | "domain";
+
 interface Props {
   tokenId: string;
   externalEntityId?: string;
+  resolveDepth?: ResolveDepth;
   triggerVersion?: number;
 }
 
-export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion }: Props) {
+function filterPath(
+  path: Array<{ level: string; state: string }>,
+  depth: ResolveDepth,
+): Array<{ level: string; state: string }> {
+  if (depth === "entity") return path;
+  if (depth === "device") return path.filter((s) => !s.level.startsWith("entity:"));
+  return path.filter((s) => !s.level.startsWith("device:") && !s.level.startsWith("entity:"));
+}
+
+function effectiveFromPath(steps: Array<{ level: string; state: string }>): string {
+  if (steps.some((s) => s.state === "RED")) return "DENY";
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].state === "GREEN") return "WRITE";
+    if (steps[i].state === "YELLOW") return "READ";
+  }
+  return "NO_ACCESS";
+}
+
+const EFFECTIVE_CLASS: Record<string, string> = {
+  WRITE: "state-GREEN",
+  READ: "state-YELLOW",
+  DENY: "state-RED",
+  NO_ACCESS: "state-GREY",
+  NOT_FOUND: "state-GREY",
+};
+
+export function PermissionSimulator({ tokenId, externalEntityId, resolveDepth = "entity", triggerVersion }: Props) {
   const [entityInput, setEntityInput] = useState(externalEntityId ?? "");
   const [result, setResult] = useState<ResolveResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -37,21 +66,23 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
     }
   }, [tokenId]);
 
-  // External entity click: update input and simulate immediately, suppress debounce
+  // External entity set: update input and suppress debounce (simulation handled by Effect 2)
   useEffect(() => {
     if (externalEntityId) {
       externalUpdateRef.current = true;
       setEntityInput(externalEntityId);
-      simulate(externalEntityId);
     }
-  }, [externalEntityId, simulate]);
+  }, [externalEntityId]);
 
-  // Permissions changed: re-simulate current entity
+  // Simulate when entity selection or permissions version changes.
+  // Uses externalEntityId directly (not stale entityInputRef) when it just changed,
+  // preventing the race where entityInputRef still holds the previous entity.
   useEffect(() => {
-    if (triggerVersion && triggerVersion > 0 && entityInputRef.current.trim()) {
-      simulate(entityInputRef.current.trim());
-    }
-  }, [triggerVersion, simulate]);
+    const entity = externalEntityId?.trim() || entityInputRef.current.trim();
+    if (!entity) return;
+    if (!triggerVersion && !externalEntityId) return;
+    simulate(entity);
+  }, [triggerVersion, externalEntityId, simulate]);
 
   // Manual typing: debounce 600ms (skip if input was set externally)
   useEffect(() => {
@@ -64,14 +95,6 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
     return () => clearTimeout(timer);
   }, [entityInput, simulate]);
 
-  const effectiveColor: Record<string, string> = {
-    WRITE: "var(--success-color, #4caf50)",
-    READ: "var(--warning-color, #ff9800)",
-    DENY: "var(--error-color, #f44336)",
-    NO_ACCESS: "var(--secondary-text-color, #9e9e9e)",
-    NOT_FOUND: "var(--secondary-text-color, #9e9e9e)",
-  };
-
   return (
     <div>
       <input
@@ -79,37 +102,32 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
         placeholder="entity_id (e.g. light.kitchen)"
         value={entityInput}
         onChange={(e) => setEntityInput(e.target.value)}
-        style={{ width: "100%", boxSizing: "border-box" }}
       />
-      {loading && !result && <div style={{ fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 6 }}>Simulating...</div>}
-      {error && <div className="banner banner-error" style={{ marginTop: 6 }}>{error}</div>}
-      {result && (
-        <div className="sim-path">
-          {result.resolution_path.map((step, i) => (
-            <div key={i} className="sim-step">
-              <span style={{ color: "var(--secondary-text-color, #9e9e9e)" }}>{step.level}</span>
-              {" -> "}
-              <span
-                style={{
-                  color:
-                    step.state === "GREEN" ? "var(--success-color, #4caf50)"
-                    : step.state === "YELLOW" ? "var(--warning-color, #ff9800)"
-                    : step.state === "RED" ? "var(--error-color, #f44336)"
-                    : "var(--secondary-text-color, #9e9e9e)",
-                }}
-              >
-                {step.state}
+      {loading && !result && <div className="sim-loading">Simulating...</div>}
+      {error && <div className="banner banner-error mt-6">{error}</div>}
+      {result && (() => {
+        const visiblePath = filterPath(result.resolution_path, resolveDepth);
+        const effective = effectiveFromPath(visiblePath);
+        return (
+          <div className="sim-path">
+            {visiblePath.map((step, i) => (
+              <div key={i} className="sim-step">
+                <span className="sim-resolution-level">{step.level}</span>
+                {" -> "}
+                <span className={`state-${step.state}`}>
+                  {step.state}
+                </span>
+              </div>
+            ))}
+            <div className="sim-result">
+              {"Result: "}
+              <span className={EFFECTIVE_CLASS[effective] ?? "state-GREY"}>
+                {effective}
               </span>
             </div>
-          ))}
-          <div style={{ marginTop: 8, fontWeight: 500 }}>
-            {"Result: "}
-            <span style={{ color: effectiveColor[result.effective] ?? "#9e9e9e" }}>
-              {result.effective}
-            </span>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

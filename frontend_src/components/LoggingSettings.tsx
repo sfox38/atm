@@ -59,21 +59,20 @@ export function LoggingSettings({ settings, onToggle, saving }: Props) {
         return (
           <div
             key={key}
-            className="toggle-row"
-            style={{ opacity: greyed ? 0.5 : 1 }}
+            className={`toggle-row${greyed ? " toggle-row-greyed" : ""}`}
           >
             <div className="toggle-label">
-              <span style={{ fontWeight: master ? 500 : undefined }}>{label}</span>
+              <span className={master ? "toggle-label-master" : undefined}>{label}</span>
               <small>{description}</small>
             </div>
-            <label style={{ display: "flex", alignItems: "center", cursor: (saving || greyed) ? "not-allowed" : "pointer" }}>
+            <label className={`toggle-switch${(saving || greyed) ? " disabled" : ""}`}>
               <input
                 type="checkbox"
                 checked={settings[key] as boolean}
                 disabled={saving || greyed}
                 onChange={(e) => onToggle(key, e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "var(--primary-color, #03a9f4)", cursor: "inherit" }}
               />
+              <span className="toggle-switch-track" />
             </label>
           </div>
         );

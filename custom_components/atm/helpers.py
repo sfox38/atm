@@ -423,6 +423,7 @@ class ScrubbedState:
         self.attributes = {k: v for k, v in raw.attributes.items() if k not in SENSITIVE_ATTRIBUTES}
         self.last_updated = getattr(raw, "last_updated", None)
         self.last_changed = getattr(raw, "last_changed", None)
+        self.last_reported = getattr(raw, "last_reported", None)
         # Strip user_id from context to prevent HA user ID enumeration via templates.
         ctx = getattr(raw, "context", None)
         if ctx is not None:
@@ -464,6 +465,29 @@ class ScrubbedState:
         }
 
 
+class _DomainFilteredStates:
+    """Iterable wrapper for a single domain's entities inside FilteredStates.
+
+    Supports both iteration ({% for state in states.light %}) yielding
+    ScrubbedState objects, and attribute access (states.light.living_room)
+    returning individual entities by object_id.
+    """
+
+    def __init__(self, entities: dict) -> None:
+        self._entities = entities
+
+    def __iter__(self):
+        return iter(self._entities.values())
+
+    def __len__(self) -> int:
+        return len(self._entities)
+
+    def __getattr__(self, object_id: str):
+        if object_id.startswith("_"):
+            raise AttributeError(object_id)
+        return self._entities.get(object_id)
+
+
 class FilteredStates:
     """Callable proxy over a permitted-entity dict mimicking the HA template 'states' global.
 
@@ -491,11 +515,12 @@ class FilteredStates:
     def __getattr__(self, domain: str):
         if domain.startswith("_"):
             raise AttributeError(domain)
-        return {
+        entities = {
             eid.split(".", 1)[1]: s
             for eid, s in self._permitted.items()
             if eid.split(".")[0] == domain
         }
+        return _DomainFilteredStates(entities)
 
 
 _LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
@@ -504,7 +529,12 @@ _ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
 
 
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
-    """Read system_log records, filter, scrub, and return newest-first."""
+    """Read system_log records, filter, scrub, and return newest-first.
+
+    Accesses hass.data["system_log"].records directly - this is an undocumented
+    HA internal API with no public alternative. Falls back to an empty list if
+    the structure changes across HA versions.
+    """
     min_rank = _LOG_LEVEL_RANK.get(level.upper(), _LOG_LEVEL_RANK["WARNING"])
     syslog = hass.data.get("system_log")
     if syslog is None:

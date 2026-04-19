@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import type { TokenRecord, PatchTokenBody } from "../types";
 import { api } from "../api";
 
@@ -11,7 +11,6 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
   const [requests, setRequests] = useState(String(token.rate_limit_requests));
   const [burst, setBurst] = useState(String(token.rate_limit_burst));
   const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setRequests(String(token.rate_limit_requests));
@@ -41,44 +40,36 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
     }
   }
 
-  function scheduleAutoSave(reqStr: string, burstStr: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => save(reqStr, burstStr), 800);
-  }
-
-  function handleBlur(reqStr: string, burstStr: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    save(reqStr, burstStr);
-  }
-
   return (
     <div>
-      {error && <div className="banner banner-error" style={{ marginBottom: 8 }}>{error}</div>}
-      <div className="field" style={{ margin: "0 0 8px" }}>
-        <label>Requests per minute (0 = disabled)</label>
-        <input
-          className="input"
-          type="number"
-          min={0}
-          value={requests}
-          onChange={(e) => { setRequests(e.target.value); scheduleAutoSave(e.target.value, burst); }}
-          onBlur={(e) => handleBlur(e.target.value, burst)}
-        />
-      </div>
-      <div className="field" style={{ margin: 0 }}>
-        <label>Burst per second</label>
-        <input
-          className="input"
-          type="number"
-          min={0}
-          value={burstDisabled ? "0" : burst}
-          disabled={burstDisabled}
-          onChange={(e) => { setBurst(e.target.value); scheduleAutoSave(requests, e.target.value); }}
-          onBlur={(e) => handleBlur(requests, e.target.value)}
-        />
+      {error && <div className="banner banner-error mb-8">{error}</div>}
+      <div className="rate-limit-row">
+        <div className="field">
+          <label>Requests per minute (0 = disabled)</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={requests}
+            onChange={(e) => setRequests(e.target.value)}
+            onBlur={(e) => save(e.target.value, burst)}
+          />
+        </div>
+        <div className="field">
+          <label>Burst per second</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={burstDisabled ? "0" : burst}
+            disabled={burstDisabled}
+            onChange={(e) => setBurst(e.target.value)}
+            onBlur={(e) => save(requests, e.target.value)}
+          />
+        </div>
       </div>
       {requestsNum === 0 && (
-        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)" }}>
+        <p className="rate-limit-disabled-text">
           Rate limiting is disabled for this token.
         </p>
       )}

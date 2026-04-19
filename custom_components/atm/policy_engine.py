@@ -38,7 +38,7 @@ class EntityCreationNotPermitted(Exception):
 
 
 _RELATIVE_TIME_RE = re.compile(r"^(\d+)(h|d|w|m)$")
-_ENTITY_ID_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
 
 def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permission:
@@ -226,6 +226,10 @@ def expand_service_targets(
                     for eid in device_entity_index.get(device.id, []):
                         candidates.add(eid)
 
+    # No explicit targets: expand to all domain entities. This mirrors native HA
+    # behavior (a service call with no targets affects all entities in the domain).
+    # ATM still filters through resolve_service_targets before calling HA, so only
+    # WRITE-permitted entities are included in the final call.
     if entity_id is None and device_id is None and area_id is None:
         for state in hass.states.async_all():
             if state.entity_id.split(".")[0] == service_domain:
@@ -394,6 +398,21 @@ def template_blocklist_vars() -> dict:
         "closest": lambda *a, **kw: None,
         "is_device_attr": lambda *a, **kw: False,
         "area_id": lambda *a, **kw: None,
+        # State access - can reveal state/attributes of out-of-scope entities
+        "state_translated": lambda *a, **kw: None,
+        "state_attr_translated": lambda *a, **kw: None,
+        "entity_name": lambda *a, **kw: None,
+        "distance": lambda *a, **kw: None,
+        "is_hidden_entity": lambda *a, **kw: False,
+        # Device/area/config metadata enumeration
+        "config_entry_id": lambda *a, **kw: None,
+        "device_name": lambda *a, **kw: None,
+        "area_name": lambda *a, **kw: None,
+        "label_description": lambda *a, **kw: None,
+        "label_devices": lambda *a, **kw: [],
+        # HA issues (could reveal integration problems or installed components)
+        "issues": lambda *a, **kw: [],
+        "issue": lambda *a, **kw: None,
     }
 
 
