@@ -36,9 +36,9 @@ const OUTCOME_CLASS: Record<Outcome, string> = {
 
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--divider-color, #e0e0e0)" }}>
-      <span style={{ width: 88, flexShrink: 0, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary-text-color, #9e9e9e)", paddingTop: 1 }}>{label}</span>
-      <span style={{ fontSize: 13, wordBreak: "break-all", fontFamily: mono ? "monospace" : undefined }}>{value}</span>
+    <div className="detail-row">
+      <span className="detail-label">{label}</span>
+      <span className={mono ? "detail-value-mono" : "detail-value"}>{value}</span>
     </div>
   );
 }
@@ -47,7 +47,7 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title" style={{ marginBottom: 12 }}>Audit Entry</h3>
+        <h3 className="modal-title audit-section-title">Audit Entry</h3>
         <DetailRow label="Time" value={formatTs(entry.timestamp)} />
         <DetailRow label="Token" value={entry.token_name} />
         <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
@@ -73,7 +73,7 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
 
   if (entries.length === 0) {
     return (
-      <p style={{ color: "var(--secondary-text-color, #9e9e9e)", fontSize: 13 }}>
+      <p className="audit-empty">
         No audit entries found.
       </p>
     );
@@ -105,7 +105,7 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
               onClick={() => setSelected(entry)}
             >
               <td
-                style={{ fontFamily: "monospace", fontSize: 11 }}
+                className="audit-cell-reqid"
                 title={entry.request_id}
               >
                 {entry.request_id.slice(0, 8)}...
@@ -115,9 +115,9 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
                 <span className="audit-time-short">{formatTsShort(entry.timestamp)}</span>
               </td>
               <td title={entry.token_name}>{entry.token_name.replace(/^(admin):(.+)$/, "$1 ($2)")}</td>
-              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{entry.method}</td>
+              <td className="audit-cell-method">{entry.method}</td>
               <td
-                style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                className="audit-cell-resource"
                 title={entry.resource}
               >
                 {entry.resource}
@@ -128,7 +128,7 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
                 </span>
               </td>
               <td
-                style={{ fontFamily: "monospace", fontSize: 12 }}
+                className="audit-cell-ip"
                 title={entry.client_ip}
               >
                 {entry.client_ip}

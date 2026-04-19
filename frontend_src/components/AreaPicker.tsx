@@ -110,13 +110,13 @@ export function AreaPicker({ tokenId, entityTree, onDone, onClose }: Props) {
         </div>
 
         {selectedArea && (
-          <p style={{ fontSize: 13, color: "var(--secondary-text-color, #9e9e9e)", margin: "0 0 12px" }}>
+          <p className="area-picker-summary">
             This will set {affectedEntities.length} {affectedEntities.length === 1 ? "entity" : "entities"} to {selectedState}.
           </p>
         )}
 
         {error && <div className="banner banner-error">{error}</div>}
-        {progress && <p style={{ fontSize: 13 }}>Applying... {progress}</p>}
+        {progress && <p className="area-picker-progress">Applying... {progress}</p>}
 
         <div className="modal-actions">
           <button className="btn btn-text" onClick={onClose} disabled={applying}>Cancel</button>

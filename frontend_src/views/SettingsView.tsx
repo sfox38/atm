@@ -60,15 +60,14 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
           onToggle={patchSetting}
           saving={saving}
         />
-        <hr style={{ border: "none", borderTop: "1px solid var(--divider-color, #e0e0e0)", margin: "8px 0" }} />
-        <div className="toggle-row" style={{ marginTop: 8, opacity: settings.disable_all_logging ? 0.5 : 1 }}>
+        <hr className="settings-divider" />
+        <div className={`toggle-row settings-toggle-mt${settings.disable_all_logging ? " toggle-row-greyed" : ""}`}>
           <div className="toggle-label">
             <span>Audit log flush interval</span>
             <small>How often to snapshot the audit log to disk. "Never" keeps the log in-memory only.</small>
           </div>
           <select
-            className="input"
-            style={{ flex: "0 0 auto", width: "auto" }}
+            className="input input-auto"
             value={settings.audit_flush_interval}
             disabled={saving || settings.disable_all_logging}
             onChange={(e) => patchSetting("audit_flush_interval", Number(e.target.value))}
@@ -81,14 +80,13 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
             <option value={60}>Every 60 minutes</option>
           </select>
         </div>
-        <div className="toggle-row" style={{ opacity: settings.disable_all_logging ? 0.5 : 1 }}>
+        <div className={`toggle-row${settings.disable_all_logging ? " toggle-row-greyed" : ""}`}>
           <div className="toggle-label">
             <span>Maximum log entries</span>
             <small>Capacity of the in-memory buffer and the on-disk snapshot. Reducing this trims the oldest entries immediately.</small>
           </div>
           <select
-            className="input"
-            style={{ flex: "0 0 auto", width: "auto" }}
+            className="input input-auto"
             value={settings.audit_log_maxlen}
             disabled={saving || settings.disable_all_logging}
             onChange={(e) => patchSetting("audit_log_maxlen", Number(e.target.value))}
@@ -121,26 +119,26 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
 
       <div className="card">
         <div className="card-header">Integration Info</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+        <div className="settings-info-list">
           <div><strong>Version:</strong> {atmVersion ?? "..."}</div>
           <div><strong>Minimum HA version:</strong> {minHaVersion ?? "..."}</div>
           <div>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer"
-              style={{ color: "var(--primary-color, #03a9f4)" }}>
+              className="settings-info-link">
               GitHub repository
             </a>
           </div>
-          <div style={{ fontSize: 13, color: "var(--secondary-text-color, #9e9e9e)" }}>
+          <div className="settings-info-note">
             ATM configuration is stored in <code>.storage/atm.json</code> and is included in all HA full backups and partial backups of the <code>.storage</code> directory.
           </div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-header" style={{ color: "var(--error-color, #f44336)" }}>
+        <div className="card-header settings-danger-header">
           Data Management
         </div>
-        <p style={{ fontSize: 13, marginTop: 0 }}>
+        <p className="clear-perms-body">
           Permanently deletes all active tokens, archived records, permission trees, capability flags, settings, the in-memory audit log, and the on-disk audit log snapshot. All tokens are immediately invalidated.
         </p>
         <button
@@ -158,7 +156,7 @@ export function SettingsView({ settings, onSettingsChange }: Props) {
         />
       )}
 
-      <div style={{ textAlign: "right", fontSize: 11, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 8, opacity: 0.6 }}>
+      <div className="settings-version">
         js build {JS_BUILD}
       </div>
     </div>

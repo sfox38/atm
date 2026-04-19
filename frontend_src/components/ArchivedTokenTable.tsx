@@ -32,12 +32,12 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
   }
 
   if (tokens.length === 0) {
-    return <p style={{ color: "var(--secondary-text-color, #9e9e9e)", fontSize: 13 }}>No archived tokens.</p>;
+    return <p className="archived-empty">No archived tokens.</p>;
   }
 
   return (
     <div>
-      {error && <div className="banner banner-error" style={{ marginBottom: 8 }}>{error}</div>}
+      {error && <div className="banner banner-error mb-8">{error}</div>}
       <table className="data-table archived-table">
         <thead>
           <tr>
@@ -76,7 +76,7 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
                 <td>{formatDate(t.last_used_at)}</td>
                 <td>
                   {confirmId === t.id ? (
-                    <span style={{ display: "flex", gap: 4 }}>
+                    <span className="row-actions">
                       <button
                         className="btn btn-danger btn-sm"
                         onClick={() => deletePermanently(t.id)}
@@ -93,8 +93,7 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
                     </span>
                   ) : (
                     <button
-                      className="btn btn-text btn-sm"
-                      style={{ color: "var(--error-color, #f44336)" }}
+                      className="btn btn-text btn-sm btn-text-danger"
                       onClick={() => setConfirmId(t.id)}
                     >
                       Delete permanently

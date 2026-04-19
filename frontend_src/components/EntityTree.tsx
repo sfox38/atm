@@ -105,7 +105,7 @@ function HintInput({ tokenId, entityId, currentHint, currentState, onSaved }: Hi
   }
 
   return (
-    <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+    <span className="hint-input-row">
       <input
         className="tree-hint-input"
         value={value}
@@ -165,10 +165,9 @@ function EntityRow({
 
   return (
     <div className="tree-node" style={{ paddingLeft: `${indent * 20 + 6}px` }}>
-      <span style={{ width: 20, flexShrink: 0 }} />
+      <span className="tree-spacer" />
       <div
-        className="tree-name"
-        style={{ cursor: onEntityClick ? "pointer" : undefined }}
+        className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
         onClick={() => onEntityClick?.(entityId)}
         title={onEntityClick ? `Simulate permissions for ${entityId}` : undefined}
       >
@@ -251,11 +250,11 @@ function DeviceGroup({
 
   return (
     <div>
-      <div className="tree-node" style={{ paddingLeft: "26px" }}>
+      <div className="tree-node tree-device-indent">
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
           {expanded ? "v" : ">"}
         </button>
-        <div className="tree-name" style={{ cursor: "pointer" }} onClick={() => setExpanded((x) => !x)}>
+        <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly">{deviceName}</span>
         </div>
         {isDynamic && (
@@ -350,13 +349,13 @@ function DomainGroup({
   if (filterText && !hasVisible) return null;
 
   return (
-    <div style={{ marginBottom: 4 }}>
+    <div className="tree-domain-group">
       <div className="tree-node">
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
           {expanded ? "v" : ">"}
         </button>
-        <div className="tree-name" style={{ cursor: "pointer" }} onClick={() => setExpanded((x) => !x)}>
-          <span className="tree-friendly" style={{ fontWeight: 500 }}>{domainKey}</span>
+        <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
+          <span className="tree-friendly tree-domain-label">{domainKey}</span>
         </div>
         {isDynamic && (
           <span className="tree-badge tree-badge-dynamic" title="New entities added to this domain will automatically inherit this permission.">Dynamic</span>
@@ -392,9 +391,9 @@ function DomainGroup({
           {domainData.deviceless_entities.length > 0 && (
             <div>
               {Object.keys(domainData.devices).length > 0 && (
-                <div className="tree-node" style={{ paddingLeft: "26px" }}>
-                  <span style={{ width: 20, flexShrink: 0 }} />
-                  <span className="tree-name" style={{ color: "var(--secondary-text-color, #9e9e9e)", fontSize: 12 }}>
+                <div className="tree-node tree-device-indent">
+                  <span className="tree-spacer" />
+                  <span className="tree-name tree-orphan-label">
                     Deviceless Entities
                   </span>
                 </div>

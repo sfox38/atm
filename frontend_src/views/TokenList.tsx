@@ -88,7 +88,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
       <div className="card">
         <div className="card-header">
           <span>Tokens ({tokens.length})</span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="token-list-actions">
             <button className="btn btn-text btn-sm" onClick={() => { onRefresh(); if (showArchived) refreshArchived(); }}>Refresh</button>
             <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
               Create Token
@@ -127,7 +127,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: "center", color: "var(--secondary-text-color, #9e9e9e)" }}>
+                  <td colSpan={9} className="token-table-empty">
                     {filter ? "No tokens match the filter." : "No tokens yet. Create one to get started."}
                   </td>
                 </tr>
@@ -141,7 +141,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                     className={`clickable${t.pass_through ? " pass-through-row" : ""}`}
                     onClick={() => onOpenDetail(t.id)}
                   >
-                    <td style={{ fontWeight: 500 }}>{t.name}</td>
+                    <td className="token-name">{t.name}</td>
                     <td>
                       {t.pass_through ? (
                         <span className="badge badge-amber">Pass Through</span>
@@ -160,7 +160,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                         : `${t.rate_limit_requests}/min`}
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: "flex", gap: 4 }}>
+                      <div className="row-actions">
                         <button
                           className="btn btn-text btn-sm"
                           onClick={() => onOpenDetail(t.id)}
@@ -177,11 +177,10 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
         )}
       </div>
 
-      <div style={{ marginTop: 8 }}>
+      <div className="archived-toggle-section">
         <button
           className="btn btn-text"
           onClick={() => onShowArchivedChange(!showArchived)}
-          style={{ textTransform: "none", letterSpacing: 0 }}
         >
           {showArchived ? "Hide archived" : "Show archived"}
         </button>

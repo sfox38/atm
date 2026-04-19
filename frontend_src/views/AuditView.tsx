@@ -53,8 +53,7 @@ export function AuditView({ tokens }: Props) {
 
         <div className="filter-row">
           <select
-            className="input"
-            style={{ flex: "0 0 auto", width: "auto" }}
+            className="input input-auto"
             value={tokenFilter}
             onChange={(e) => { setTokenFilter(e.target.value); setPage(0); }}
           >
@@ -64,8 +63,7 @@ export function AuditView({ tokens }: Props) {
             ))}
           </select>
           <select
-            className="input"
-            style={{ flex: "0 0 auto", width: "auto" }}
+            className="input input-auto"
             value={outcomeFilter}
             onChange={(e) => { setOutcomeFilter(e.target.value as Outcome | ""); setPage(0); }}
           >

@@ -193,8 +193,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
 
   return (
     <div>
-      <div style={{ marginBottom: 12 }}>
-        <button className="btn btn-text" onClick={onBack} style={{ textTransform: "none", letterSpacing: 0 }}>
+      <div className="token-back-section">
+        <button className="btn btn-text" onClick={onBack}>
           Back to token list
         </button>
       </div>
@@ -204,7 +204,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       {token.pass_through && (
         <div className="pass-through-header-banner">
           <p>
-            <strong style={{ color: "var(--warning-color, #ff9800)" }}>This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
+            <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
           </p>
         </div>
       )}
@@ -212,7 +212,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       <div className="card">
         <div className="card-header">
           <span>{token.name}</span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="token-header-actions">
             {!showRotateConfirm && !showRevoke && (
               <button
                 className="btn btn-text btn-sm"
@@ -222,8 +222,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
               </button>
             )}
             {showRotateConfirm && (
-              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 13 }}>Old token invalidated immediately. Continue?</span>
+              <span className="inline-confirm">
+                <span className="inline-confirm-text">Old token invalidated immediately. Continue?</span>
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={rotate}
@@ -244,8 +244,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                     Revoke
                   </button>
                 ) : (
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 13 }}>Revoke token?</span>
+                  <span className="inline-confirm">
+                    <span className="inline-confirm-text">Revoke token?</span>
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={revoke}
@@ -276,19 +276,19 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
           </div>
           <div className="stat-item">
             <span className="stat-label">Created</span>
-            <span className="stat-value" style={{ fontSize: 13 }} title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
+            <span className="stat-value stat-value-sm" title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Last Updated</span>
-            <span className="stat-value" style={{ fontSize: 13 }} title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
+            <span className="stat-value stat-value-sm" title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Expires</span>
-            <span className="stat-value" style={{ fontSize: 13 }}>{formatDate(token.expires_at)}</span>
+            <span className="stat-value stat-value-sm">{formatDate(token.expires_at)}</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Last used</span>
-            <span className="stat-value" style={{ fontSize: 13 }}>{formatDate(token.last_used_at)}</span>
+            <span className="stat-value stat-value-sm">{formatDate(token.last_used_at)}</span>
           </div>
         </div>
 
@@ -296,8 +296,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
           <div>
             {!ptConfirmBox ? (
               <button
-                className="btn btn-text btn-sm"
-                style={{ color: "var(--warning-color, #ff9800)" }}
+                className="btn btn-text btn-sm btn-text-warning"
                 onClick={() => setPtConfirmBox(true)}
               >
                 Enable pass-through mode
@@ -312,11 +311,11 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                     type="checkbox"
                     checked={ptConfirmed}
                     onChange={(e) => setPtConfirmed(e.target.checked)}
-                    style={{ width: 18, height: 18, accentColor: "var(--warning-color, #ff9800)", cursor: "pointer" }}
+                    className="checkbox-warning"
                   />
                   <span>I understand this token will have full Home Assistant access</span>
                 </label>
-                <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <div className="pt-enable-actions">
                   <button
                     className="btn btn-primary"
                     onClick={enablePassThrough}
@@ -376,15 +375,14 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <div className="card">
               <div className="card-header">
                 <span>Permissions Tree</span>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div className="tree-header-actions">
                   {entityTree && (
                     <button className="btn btn-text btn-sm" onClick={() => setShowAreaPicker(true)}>
                       Select by Area
                     </button>
                   )}
                   <button
-                    className="btn btn-text btn-sm"
-                    style={{ color: "var(--error-color, #f44336)" }}
+                    className="btn btn-text btn-sm btn-text-danger"
                     onClick={() => setShowClearPerms(true)}
                   >
                     Clear All
@@ -422,7 +420,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
         <div className="modal-backdrop">
           <div className="modal">
             <h3 className="modal-title">Clear all permissions?</h3>
-            <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+            <p className="clear-perms-body">
               This will reset every domain, device, and entity permission to [N] (no explicit grant). The token will have no access to any entities until new permissions are assigned.
             </p>
             <div className="modal-actions">

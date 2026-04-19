@@ -185,12 +185,11 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
 
         <div className="field">
           <label>Expiry</label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="token-create-expiry-row">
             <select
-              className="input"
+              className="input input-auto"
               value={ttlUnit}
               onChange={(e) => setTtlUnit(e.target.value as TtlUnit)}
-              style={{ flex: "0 0 auto", width: "auto" }}
             >
               <option value="none">No expiry</option>
               <option value="minutes">Minutes</option>
@@ -200,12 +199,11 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             </select>
             {ttlUnit !== "none" && (
               <input
-                className="input"
+                className="input token-create-expiry-value"
                 type="number"
                 min={1}
                 value={ttlValue}
                 onChange={(e) => setTtlValue(e.target.value)}
-                style={{ width: 80 }}
               />
             )}
           </div>
@@ -216,12 +214,12 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             <span>Pass-through mode</span>
             <small>Bypasses all entity and capability checks. Equivalent to a Long-Lived Access Token.</small>
           </div>
-          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+          <label className="toggle-checkbox-label">
             <input
               type="checkbox"
               checked={passThrough}
               onChange={(e) => { setPassThrough(e.target.checked); setPtConfirmed(false); }}
-              style={{ width: 18, height: 18, accentColor: "var(--warning-color, #ff9800)", cursor: "pointer" }}
+              className="toggle-checkbox-warning"
             />
           </label>
         </div>
@@ -231,20 +229,20 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             <p>
               <strong>This token will have unrestricted access to every entity, service, and system operation in Home Assistant.</strong> It is equivalent to a Long-Lived Access Token. Use only for tools you fully control. Revocation and expiry still apply. Works only with HTTP-based MCP clients, not stdio-based ones.
             </p>
-            <label className="checkbox-row" style={{ marginTop: 10 }}>
+            <label className="checkbox-row mt-10">
               <input
                 type="checkbox"
                 checked={ptConfirmed}
                 onChange={(e) => setPtConfirmed(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "var(--warning-color, #ff9800)", cursor: "pointer" }}
+                className="checkbox-warning"
               />
               <span>I understand this token has full Home Assistant access</span>
             </label>
           </div>
         ) : (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <div className="field" style={{ margin: 0, flex: 1 }}>
+          <div className="token-create-rate-section">
+            <div className="token-create-rate-fields">
+              <div className="field token-create-rate-field">
                 <label>Requests per minute (0 = disabled)</label>
                 <input
                   className="input"
@@ -254,7 +252,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
                   onChange={(e) => setRateLimitRequests(e.target.value)}
                 />
               </div>
-              <div className="field" style={{ margin: 0, flex: 1 }}>
+              <div className="field token-create-rate-field">
                 <label>Burst per second</label>
                 <input
                   className="input"
@@ -269,7 +267,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
           </div>
         )}
 
-        {error && <div className="banner banner-error" style={{ marginTop: 12 }}>{error}</div>}
+        {error && <div className="banner banner-error mt-12">{error}</div>}
 
         <div className="modal-actions">
           <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>

@@ -53,8 +53,8 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
 
   return (
     <div>
-      {error && <div className="banner banner-error" style={{ marginBottom: 8 }}>{error}</div>}
-      <div className="field" style={{ margin: "0 0 8px" }}>
+      {error && <div className="banner banner-error mb-8">{error}</div>}
+      <div className="field rate-limit-field-sm">
         <label>Requests per minute (0 = disabled)</label>
         <input
           className="input"
@@ -65,7 +65,7 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
           onBlur={(e) => handleBlur(e.target.value, burst)}
         />
       </div>
-      <div className="field" style={{ margin: 0 }}>
+      <div className="field rate-limit-field-last">
         <label>Burst per second</label>
         <input
           className="input"
@@ -78,7 +78,7 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
         />
       </div>
       {requestsNum === 0 && (
-        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)" }}>
+        <p className="rate-limit-disabled-text">
           Rate limiting is disabled for this token.
         </p>
       )}

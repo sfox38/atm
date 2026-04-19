@@ -130,7 +130,7 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
 
   return (
     <div>
-      {error && <div className="banner banner-error" style={{ marginBottom: 8 }}>{error}</div>}
+      {error && <div className="banner banner-error mb-8">{error}</div>}
 
       {pendingFlag && (
         <div className="modal-backdrop">
@@ -139,21 +139,20 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
             <div className="amber-block">
               <p><strong>This is an elevated-trust capability.</strong> {pendingFlag.confirmWarning}</p>
             </div>
-            <label className="checkbox-row" style={{ marginTop: 12 }}>
+            <label className="checkbox-row mt-12">
               <input
                 type="checkbox"
                 checked={ackChecked}
                 onChange={(e) => setAckChecked(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "var(--warning-color, #ff9800)", cursor: "pointer" }}
+                className="checkbox-warning"
               />
               <span>{pendingFlag.confirmAck}</span>
             </label>
             <div className="modal-actions">
               <button
-                className="btn btn-primary"
+                className="btn btn-primary btn-warning"
                 onClick={handleConfirm}
                 disabled={!ackChecked || saving === pendingKey}
-                style={{ background: "var(--warning-color, #ff9800)" }}
               >
                 {saving === pendingKey ? "Enabling..." : "Enable"}
               </button>
@@ -172,16 +171,16 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
         return (
           <div key={key} className="toggle-row">
             <div className="toggle-label">
-              <span style={danger ? { color: "var(--warning-color, #ff9800)" } : undefined}>{label}</span>
+              <span className={danger ? "text-warning" : undefined}>{label}</span>
               <small>{description}</small>
             </div>
-            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+            <label className="toggle-checkbox-label">
               <input
                 type="checkbox"
                 checked={value}
                 disabled={saving === key}
                 onChange={() => handleToggle(flag, value)}
-                style={{ width: 18, height: 18, accentColor: danger ? "var(--warning-color, #ff9800)" : "var(--primary-color, #03a9f4)", cursor: "inherit" }}
+                className={danger ? "toggle-checkbox-warning" : "toggle-checkbox"}
               />
             </label>
           </div>

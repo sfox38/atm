@@ -8,6 +8,14 @@ interface Props {
   triggerVersion?: number;
 }
 
+const EFFECTIVE_CLASS: Record<string, string> = {
+  WRITE: "state-GREEN",
+  READ: "state-YELLOW",
+  DENY: "state-RED",
+  NO_ACCESS: "state-GREY",
+  NOT_FOUND: "state-GREY",
+};
+
 export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion }: Props) {
   const [entityInput, setEntityInput] = useState(externalEntityId ?? "");
   const [result, setResult] = useState<ResolveResult | null>(null);
@@ -64,14 +72,6 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
     return () => clearTimeout(timer);
   }, [entityInput, simulate]);
 
-  const effectiveColor: Record<string, string> = {
-    WRITE: "var(--success-color, #4caf50)",
-    READ: "var(--warning-color, #ff9800)",
-    DENY: "var(--error-color, #f44336)",
-    NO_ACCESS: "var(--secondary-text-color, #9e9e9e)",
-    NOT_FOUND: "var(--secondary-text-color, #9e9e9e)",
-  };
-
   return (
     <div>
       <input
@@ -79,32 +79,23 @@ export function PermissionSimulator({ tokenId, externalEntityId, triggerVersion 
         placeholder="entity_id (e.g. light.kitchen)"
         value={entityInput}
         onChange={(e) => setEntityInput(e.target.value)}
-        style={{ width: "100%", boxSizing: "border-box" }}
       />
-      {loading && !result && <div style={{ fontSize: 12, color: "var(--secondary-text-color, #9e9e9e)", marginTop: 6 }}>Simulating...</div>}
-      {error && <div className="banner banner-error" style={{ marginTop: 6 }}>{error}</div>}
+      {loading && !result && <div className="sim-loading">Simulating...</div>}
+      {error && <div className="banner banner-error mt-6">{error}</div>}
       {result && (
         <div className="sim-path">
           {result.resolution_path.map((step, i) => (
             <div key={i} className="sim-step">
-              <span style={{ color: "var(--secondary-text-color, #9e9e9e)" }}>{step.level}</span>
+              <span className="sim-resolution-level">{step.level}</span>
               {" -> "}
-              <span
-                style={{
-                  color:
-                    step.state === "GREEN" ? "var(--success-color, #4caf50)"
-                    : step.state === "YELLOW" ? "var(--warning-color, #ff9800)"
-                    : step.state === "RED" ? "var(--error-color, #f44336)"
-                    : "var(--secondary-text-color, #9e9e9e)",
-                }}
-              >
+              <span className={`state-${step.state}`}>
                 {step.state}
               </span>
             </div>
           ))}
-          <div style={{ marginTop: 8, fontWeight: 500 }}>
+          <div className="sim-result">
             {"Result: "}
-            <span style={{ color: effectiveColor[result.effective] ?? "#9e9e9e" }}>
+            <span className={EFFECTIVE_CLASS[result.effective] ?? "state-GREY"}>
               {result.effective}
             </span>
           </div>
