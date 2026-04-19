@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections import deque
@@ -31,6 +32,7 @@ Outcome = Literal["allowed", "denied", "not_found", "rate_limited", "not_impleme
 _REDACTED = "[redacted]"
 
 MAX_QUERY_LIMIT = 500
+MAX_AUDIT_PAYLOAD_BYTES = 2048
 
 
 def generate_request_id() -> str:
@@ -49,9 +51,10 @@ class AuditEntry:
     outcome: Outcome
     client_ip: str
     pass_through: bool = False
+    payload: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "request_id": self.request_id,
             "timestamp": self.timestamp.isoformat(),
             "token_id": self.token_id,
@@ -62,6 +65,9 @@ class AuditEntry:
             "client_ip": self.client_ip,
             "pass_through": self.pass_through,
         }
+        if self.payload is not None:
+            d["payload"] = self.payload
+        return d
 
 
 class AuditLog:
@@ -92,6 +98,7 @@ class AuditLog:
         client_ip: str,
         settings: GlobalSettings,
         pass_through: bool = False,
+        payload: dict | None = None,
         timestamp: datetime | None = None,
     ) -> None:
         """Append an audit entry, subject to the current logging settings.
@@ -113,6 +120,14 @@ class AuditLog:
         logged_resource = resource if settings.log_entity_names else _REDACTED
         logged_ip = client_ip if settings.log_client_ip else _REDACTED
 
+        logged_payload: str | None = None
+        if payload is not None:
+            try:
+                s = json.dumps(payload, default=str)
+                logged_payload = s if len(s) <= MAX_AUDIT_PAYLOAD_BYTES else s[:MAX_AUDIT_PAYLOAD_BYTES] + "...[truncated]"
+            except (TypeError, ValueError):
+                logged_payload = None
+
         self._log.append(AuditEntry(
             request_id=request_id,
             timestamp=timestamp or utcnow(),
@@ -123,6 +138,7 @@ class AuditLog:
             outcome=outcome,
             client_ip=logged_ip,
             pass_through=pass_through,
+            payload=logged_payload,
         ))
 
     _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"})
@@ -208,6 +224,7 @@ class AuditLog:
                     outcome=r["outcome"],
                     client_ip=r["client_ip"],
                     pass_through=r.get("pass_through", False),
+                    payload=r.get("payload"),
                 ))
             except (KeyError, TypeError, ValueError) as exc:
                 _LOGGER.warning("Skipping corrupt audit entry: %s", exc)

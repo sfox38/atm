@@ -590,6 +590,8 @@ Each row in the tree has four colored buttons. Click one to set the permission s
 
 You do not have to set every node individually. The typical pattern is to set a whole domain or device to 🟡 YELLOW or 🟢 GREEN and leave everything below it at ⬜ GREY - child nodes will inherit the parent's color automatically. Then use 🔴 RED on specific devices or entities to carve out exceptions.
 
+After granting permission to an entity, you can add an optional hint. Hints are surfaced to LLMs via the context endpoint to help them understand what an entity represents - e.g., "This lamp is on Rachels's desk, not the ceiling light".
+
 ### Select by Area
 
 The **Select by Area** button at the top of the Permissions Tree card lets you bulk-apply a permission state to all entities in a HA area at once. Pick the area, pick the state (READ, WRITE, DENY, or remove grant), and ATM sets every entity in that area in one step. Useful for quickly scoping a token to a room without clicking through the tree manually.
