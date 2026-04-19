@@ -65,14 +65,14 @@ export function LoggingSettings({ settings, onToggle, saving }: Props) {
               <span className={master ? "toggle-label-master" : undefined}>{label}</span>
               <small>{description}</small>
             </div>
-            <label className={`toggle-checkbox-label${(saving || greyed) ? " disabled" : ""}`}>
+            <label className={`toggle-switch${(saving || greyed) ? " disabled" : ""}`}>
               <input
                 type="checkbox"
                 checked={settings[key] as boolean}
                 disabled={saving || greyed}
                 onChange={(e) => onToggle(key, e.target.checked)}
-                className="toggle-checkbox"
               />
+              <span className="toggle-switch-track" />
             </label>
           </div>
         );

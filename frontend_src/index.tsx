@@ -9,6 +9,7 @@ import { api, setHass } from "./api";
 import PANEL_CSS from "./atm-panel.css?inline";
 
 type Tab = "tokens" | "audit" | "settings";
+type Theme = "light" | "dark" | "auto";
 
 const HIGH_RISK_DOMAINS = new Set([
   "homeassistant", "recorder", "system_log", "hassio",
@@ -32,18 +33,32 @@ function ErrorMsg({ msg }: { msg: string }) {
 
 export { Loading, ErrorMsg };
 
+function RefreshIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+      <polyline points="1 4 1 10 7 10" />
+      <polyline points="23 20 23 14 17 14" />
+      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
+    </svg>
+  );
+}
+
+export { RefreshIcon };
+
 type View =
   | { name: "list" }
   | { name: "detail"; tokenId: string };
 
-function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
+const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", audit: "Audit Logs", settings: "Settings" };
+
+function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow: boolean; theme: Theme; onThemeChange: (t: Theme) => void }) {
   const [tab, setTab] = useState<Tab>("tokens");
   const [view, setView] = useState<View>({ name: "list" });
   const [tokens, setTokens] = useState<TokenRecord[]>([]);
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(true);
   const [tokensError, setTokensError] = useState<string | null>(null);
-  const [showArchivedTokens, setShowArchivedTokens] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const menuRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -81,6 +96,12 @@ function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
     refreshTokens();
   }, [refreshTokens]);
 
+  const onTabClick = useCallback((t: Tab) => {
+    setTab(t);
+    setView({ name: "list" });
+    if (t === "tokens") refreshTokens();
+  }, [refreshTokens]);
+
   return (
     <div className="atm-shell">
       {narrow && (
@@ -89,21 +110,27 @@ function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
           <span className="atm-header-title">ATM</span>
         </div>
       )}
+
       <div className="atm-tabs">
         {(["tokens", "audit", "settings"] as Tab[]).map((t) => (
           <button
             key={t}
             className={`atm-tab${tab === t ? " active" : ""}`}
-            onClick={() => {
-              setTab(t);
-              if (t !== "tokens") setView({ name: "list" });
-              if (t === "tokens" || t === "audit") refreshTokens();
-            }}
+            onClick={() => onTabClick(t)}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {TAB_LABELS[t]}
           </button>
         ))}
+
+        <div className="atm-tab-spacer" />
+
+        <div className="atm-header-actions">
+          <button className="btn btn-primary btn-sm btn-header-create" onClick={() => { setTab("tokens"); setView({ name: "list" }); setShowCreate(true); }}>
+            Create Token
+          </button>
+        </div>
       </div>
+
       <div className="atm-content">
         {tab === "tokens" && view.name === "list" && (
           <TokenListView
@@ -112,8 +139,8 @@ function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
             error={tokensError}
             onRefresh={refreshTokens}
             onOpenDetail={openDetail}
-            showArchived={showArchivedTokens}
-            onShowArchivedChange={setShowArchivedTokens}
+            showCreate={showCreate}
+            onCloseCreate={() => setShowCreate(false)}
           />
         )}
         {tab === "tokens" && view.name === "detail" && (
@@ -128,6 +155,8 @@ function ATMApp({ hass, narrow }: { hass: unknown; narrow: boolean }) {
           <SettingsView
             settings={settings}
             onSettingsChange={setSettings}
+            theme={theme}
+            onThemeChange={onThemeChange}
           />
         )}
       </div>
@@ -140,9 +169,17 @@ class ATMPanelElement extends HTMLElement {
   private _hass: unknown = null;
   private _narrow: boolean = false;
   private _prevUserId: string | undefined = undefined;
+  private _theme: Theme = "auto";
 
   connectedCallback() {
     this.style.touchAction = "pan-y";
+
+    const saved = localStorage.getItem("atm-theme");
+    if (saved === "light" || saved === "dark" || saved === "auto") {
+      this._theme = saved;
+    }
+    this._applyThemeClass();
+
     const shadow = this.attachShadow({ mode: "open" });
 
     const style = document.createElement("style");
@@ -164,12 +201,13 @@ class ATMPanelElement extends HTMLElement {
 
   set hass(hass: unknown) {
     this._hass = hass;
-    setHass(hass); // update on every invocation so token is always current
+    setHass(hass);
     const uid = (hass as Record<string, Record<string, string>> | null)?.user?.id;
     if (uid !== this._prevUserId) {
       this._prevUserId = uid;
       this._render();
     }
+    if (this._theme === "auto") this._applyThemeClass();
   }
 
   set narrow(value: boolean) {
@@ -179,9 +217,41 @@ class ATMPanelElement extends HTMLElement {
     }
   }
 
+  private _applyThemeClass() {
+    this.classList.remove("atm-theme-light", "atm-theme-dark");
+    if (this._theme === "light") {
+      this.classList.add("atm-theme-light");
+    } else if (this._theme === "dark") {
+      this.classList.add("atm-theme-dark");
+    } else {
+      // Auto: follow HA's dark mode preference when available
+      const hassThemes = (this._hass as { themes?: { darkMode?: boolean } } | null)?.themes;
+      if (hassThemes?.darkMode === true) {
+        this.classList.add("atm-theme-dark");
+      } else if (hassThemes?.darkMode === false) {
+        this.classList.add("atm-theme-light");
+      }
+      // If darkMode is undefined, no class - CSS prefers-color-scheme handles it
+    }
+  }
+
+  private _setTheme(t: Theme) {
+    this._theme = t;
+    localStorage.setItem("atm-theme", t);
+    this._applyThemeClass();
+    this._render();
+  }
+
   private _render() {
     if (this._root) {
-      this._root.render(<ATMApp hass={this._hass} narrow={this._narrow} />);
+      this._root.render(
+        <ATMApp
+          hass={this._hass}
+          narrow={this._narrow}
+          theme={this._theme}
+          onThemeChange={(t) => this._setTheme(t)}
+        />
+      );
     }
   }
 }

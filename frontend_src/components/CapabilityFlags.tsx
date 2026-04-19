@@ -174,14 +174,14 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
               <span className={danger ? "text-warning" : undefined}>{label}</span>
               <small>{description}</small>
             </div>
-            <label className="toggle-checkbox-label">
+            <label className={`toggle-switch${saving === key ? " disabled" : ""}`}>
               <input
                 type="checkbox"
                 checked={value}
                 disabled={saving === key}
                 onChange={() => handleToggle(flag, value)}
-                className={danger ? "toggle-checkbox-warning" : "toggle-checkbox"}
               />
+              <span className="toggle-switch-track" />
             </label>
           </div>
         );

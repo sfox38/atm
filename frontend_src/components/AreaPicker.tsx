@@ -119,7 +119,6 @@ export function AreaPicker({ tokenId, entityTree, onDone, onClose }: Props) {
         {progress && <p className="area-picker-progress">Applying... {progress}</p>}
 
         <div className="modal-actions">
-          <button className="btn btn-text" onClick={onClose} disabled={applying}>Cancel</button>
           <button
             className="btn btn-primary"
             onClick={apply}
@@ -127,6 +126,7 @@ export function AreaPicker({ tokenId, entityTree, onDone, onClose }: Props) {
           >
             {applying ? "Applying..." : "Apply"}
           </button>
+          <button className="btn btn-text" onClick={onClose} disabled={applying}>Cancel</button>
         </div>
       </div>
     </div>

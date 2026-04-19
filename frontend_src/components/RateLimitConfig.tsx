@@ -54,28 +54,30 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
   return (
     <div>
       {error && <div className="banner banner-error mb-8">{error}</div>}
-      <div className="field rate-limit-field-sm">
-        <label>Requests per minute (0 = disabled)</label>
-        <input
-          className="input"
-          type="number"
-          min={0}
-          value={requests}
-          onChange={(e) => { setRequests(e.target.value); scheduleAutoSave(e.target.value, burst); }}
-          onBlur={(e) => handleBlur(e.target.value, burst)}
-        />
-      </div>
-      <div className="field rate-limit-field-last">
-        <label>Burst per second</label>
-        <input
-          className="input"
-          type="number"
-          min={0}
-          value={burstDisabled ? "0" : burst}
-          disabled={burstDisabled}
-          onChange={(e) => { setBurst(e.target.value); scheduleAutoSave(requests, e.target.value); }}
-          onBlur={(e) => handleBlur(requests, e.target.value)}
-        />
+      <div className="rate-limit-row">
+        <div className="field">
+          <label>Requests per minute (0 = disabled)</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={requests}
+            onChange={(e) => { setRequests(e.target.value); scheduleAutoSave(e.target.value, burst); }}
+            onBlur={(e) => handleBlur(e.target.value, burst)}
+          />
+        </div>
+        <div className="field">
+          <label>Burst per second</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={burstDisabled ? "0" : burst}
+            disabled={burstDisabled}
+            onChange={(e) => { setBurst(e.target.value); scheduleAutoSave(requests, e.target.value); }}
+            onBlur={(e) => handleBlur(requests, e.target.value)}
+          />
+        </div>
       </div>
       {requestsNum === 0 && (
         <p className="rate-limit-disabled-text">

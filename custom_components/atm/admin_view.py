@@ -16,7 +16,7 @@ from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
+from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, GITHUB_URL, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
@@ -280,8 +280,7 @@ def _build_resolution_path(entity_id: str, token: Any, hass: Any) -> list[dict]:
         path.append({"level": f"device:{device_name}", "state": device_node.state if device_node else "GREY"})
 
     entity_node = token.permissions.entities.get(entity_id)
-    if entity_node is not None:
-        path.append({"level": f"entity:{entity_id}", "state": entity_node.state})
+    path.append({"level": f"entity:{entity_id}", "state": entity_node.state if entity_node else "GREY"})
 
     return path
 
@@ -295,7 +294,7 @@ class ATMAdminInfoView(HomeAssistantView):
 
     @require_admin
     async def get(self, request: web.Request) -> web.Response:
-        return _ok({"version": ATM_VERSION, "min_ha_version": MIN_HA_VERSION}, request_id=request["atm_rid"])
+        return _ok({"version": ATM_VERSION, "min_ha_version": MIN_HA_VERSION, "github_url": GITHUB_URL}, request_id=request["atm_rid"])
 
 
 class ATMAdminArchivedTokensView(HomeAssistantView):

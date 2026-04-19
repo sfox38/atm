@@ -214,13 +214,13 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             <span>Pass-through mode</span>
             <small>Bypasses all entity and capability checks. Equivalent to a Long-Lived Access Token.</small>
           </div>
-          <label className="toggle-checkbox-label">
+          <label className="toggle-switch">
             <input
               type="checkbox"
               checked={passThrough}
               onChange={(e) => { setPassThrough(e.target.checked); setPtConfirmed(false); }}
-              className="toggle-checkbox-warning"
             />
+            <span className="toggle-switch-track" />
           </label>
         </div>
 
@@ -229,15 +229,17 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             <p>
               <strong>This token will have unrestricted access to every entity, service, and system operation in Home Assistant.</strong> It is equivalent to a Long-Lived Access Token. Use only for tools you fully control. Revocation and expiry still apply. Works only with HTTP-based MCP clients, not stdio-based ones.
             </p>
-            <label className="checkbox-row mt-10">
-              <input
-                type="checkbox"
-                checked={ptConfirmed}
-                onChange={(e) => setPtConfirmed(e.target.checked)}
-                className="checkbox-warning"
-              />
-              <span>I understand this token has full Home Assistant access</span>
-            </label>
+            <div className="toggle-row mt-10">
+              <div className="toggle-label"><span>I understand this token has full Home Assistant access</span></div>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={ptConfirmed}
+                  onChange={(e) => setPtConfirmed(e.target.checked)}
+                />
+                <span className="toggle-switch-track" />
+              </label>
+            </div>
           </div>
         ) : (
           <div className="token-create-rate-section">
@@ -270,10 +272,10 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
         {error && <div className="banner banner-error mt-12">{error}</div>}
 
         <div className="modal-actions">
-          <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>
           <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
             {saving ? "Creating..." : "Create"}
           </button>
+          <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>
         </div>
       </div>
     </div>

@@ -17,14 +17,14 @@ export function NotificationSettings({ settings, onToggle, saving }: Props) {
             Sends a HA persistent notification when any token hits its rate limit. Throttled to one notification per token per minute.
           </small>
         </div>
-        <label className={`toggle-checkbox-label${saving ? " disabled" : ""}`}>
+        <label className={`toggle-switch${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
             checked={settings.notify_on_rate_limit}
             disabled={saving}
             onChange={(e) => onToggle("notify_on_rate_limit", e.target.checked)}
-            className="toggle-checkbox"
           />
+          <span className="toggle-switch-track" />
         </label>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { TokenRecord, PatchTokenBody } from "../types";
+import ATM_ICON from "../../custom_components/atm/brand/icon.png";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
 import { CapabilityFlags } from "../components/CapabilityFlags";
@@ -41,6 +42,46 @@ async function copyToClipboard(text: string): Promise<void> {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
+}
+
+interface ConfirmModalProps {
+  title: string;
+  body: React.ReactNode;
+  checkLabel: string;
+  confirmLabel: string;
+  confirmClass: string;
+  loading: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}
+
+function ConfirmModal({ title, body, checkLabel, confirmLabel, confirmClass, loading, onConfirm, onClose }: ConfirmModalProps) {
+  const [checked, setChecked] = useState(false);
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h3 className="modal-title">{title}</h3>
+        {body}
+        <div className="toggle-row mt-12" style={{ borderTop: "1px solid var(--atm-border)", paddingTop: 12 }}>
+          <div className="toggle-label"><span>{checkLabel}</span></div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => setChecked(e.target.checked)}
+            />
+            <span className="toggle-switch-track" />
+          </label>
+        </div>
+        <div className="modal-actions">
+          <button className={`btn ${confirmClass}`} onClick={onConfirm} disabled={!checked || loading}>
+            {loading ? "Please wait..." : confirmLabel}
+          </button>
+          <button className="btn btn-text" onClick={onClose} disabled={loading}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string; tokenName: string; onClose: () => void }) {
@@ -88,18 +129,18 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
-  const [showRevoke, setShowRevoke] = useState(false);
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
   const [rotating, setRotating] = useState(false);
-  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [showRotateModal, setShowRotateModal] = useState(false);
   const [rotatedRawToken, setRotatedRawToken] = useState<string | null>(null);
   const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [showClearPerms, setShowClearPerms] = useState(false);
   const [clearingPerms, setClearingPerms] = useState(false);
   const [entityTree, setEntityTree] = useState<import("../types").EntityTree | null>(null);
   const [ptToggling, setPtToggling] = useState(false);
-  const [ptConfirmBox, setPtConfirmBox] = useState(false);
-  const [ptConfirmed, setPtConfirmed] = useState(false);
+  const [showPtModal, setShowPtModal] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState("");
+  const [selectedDepth, setSelectedDepth] = useState<"entity" | "device" | "domain">("entity");
   const [permissionsVersion, setPermissionsVersion] = useState(0);
   const [collapseTreeKey, setCollapseTreeKey] = useState(0);
 
@@ -118,7 +159,6 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Pre-fetch entity tree for AreaPicker
   useEffect(() => {
     api.getEntityTree().then(setEntityTree).catch(() => null);
   }, []);
@@ -131,6 +171,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to revoke token.");
       setRevoking(false);
+      setShowRevokeModal(false);
     }
   }
 
@@ -140,10 +181,11 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       const resp = await api.rotateToken(tokenId);
       const { token: rawToken } = resp as { token: string };
       setRotatedRawToken(rawToken);
-      setShowRotateConfirm(false);
+      setShowRotateModal(false);
       onRefresh?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to rotate token.");
+      setShowRotateModal(false);
     } finally {
       setRotating(false);
     }
@@ -165,16 +207,15 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   }
 
   async function enablePassThrough() {
-    if (!ptConfirmed) return;
     setPtToggling(true);
     try {
       const body: PatchTokenBody = { pass_through: true, confirm_pass_through: true };
       const updated = await api.patchToken(tokenId, body);
       setToken(updated);
-      setPtConfirmBox(false);
-      setPtConfirmed(false);
+      setShowPtModal(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to enable pass-through.");
+      setShowPtModal(false);
     } finally {
       setPtToggling(false);
     }
@@ -192,215 +233,198 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const statusClass = status === "Active" ? "badge-green" : status === "Expired" ? "badge-grey" : "badge-red";
 
   return (
-    <div>
-      <div className="token-back-section">
-        <button className="btn btn-text" onClick={onBack}>
-          Back to token list
-        </button>
-      </div>
+    <div className="token-detail-wrap">
 
-      {error && <ErrorMsg msg={error} />}
-
-      {token.pass_through && (
-        <div className="pass-through-header-banner">
-          <p>
-            <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
-          </p>
-        </div>
+      {/* Modals */}
+      {showRotateModal && (
+        <ConfirmModal
+          title="Rotate Token"
+          body={
+            <div className="amber-block">
+              <p>Rotating will <strong>immediately invalidate the current token value.</strong> A new token value will be generated and shown once. Any clients using the old value will be rejected immediately.</p>
+            </div>
+          }
+          checkLabel="I understand the current token value will be invalidated immediately"
+          confirmLabel="Rotate Token"
+          confirmClass="btn-primary"
+          loading={rotating}
+          onConfirm={rotate}
+          onClose={() => setShowRotateModal(false)}
+        />
       )}
 
-      <div className="card">
-        <div className="card-header">
-          <span>{token.name}</span>
-          <div className="token-header-actions">
-            {!showRotateConfirm && !showRevoke && (
-              <button
-                className="btn btn-text btn-sm"
-                onClick={() => setShowRotateConfirm(true)}
-              >
-                Rotate
-              </button>
-            )}
-            {showRotateConfirm && (
-              <span className="inline-confirm">
-                <span className="inline-confirm-text">Old token invalidated immediately. Continue?</span>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={rotate}
-                  disabled={rotating}
-                >
-                  {rotating ? "Rotating..." : "Confirm"}
-                </button>
-                <button className="btn btn-text btn-sm" onClick={() => setShowRotateConfirm(false)}>Cancel</button>
-              </span>
-            )}
-            {!showRotateConfirm && (
-              <>
-                {!showRevoke ? (
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => setShowRevoke(true)}
-                  >
-                    Revoke
-                  </button>
-                ) : (
-                  <span className="inline-confirm">
-                    <span className="inline-confirm-text">Revoke token?</span>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={revoke}
-                      disabled={revoking}
-                    >
-                      {revoking ? "Revoking..." : "Confirm"}
-                    </button>
-                    <button className="btn btn-text btn-sm" onClick={() => setShowRevoke(false)}>Cancel</button>
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+      {showRevokeModal && (
+        <ConfirmModal
+          title="Revoke Token"
+          body={
+            <div className="amber-block">
+              <p>Revoking <strong>permanently deactivates this token.</strong> It cannot be re-enabled. All active SSE connections will be terminated immediately and all clients using this token will lose access.</p>
+            </div>
+          }
+          checkLabel="I understand this token will be permanently deactivated"
+          confirmLabel="Revoke Token"
+          confirmClass="btn-danger"
+          loading={revoking}
+          onConfirm={revoke}
+          onClose={() => setShowRevokeModal(false)}
+        />
+      )}
 
-        <div className="stat-row">
-          <div className="stat-item">
-            <span className="stat-label">Status</span>
-            <span className="stat-value"><span className={`badge ${statusClass}`}>{status}</span></span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Mode</span>
-            <span className="stat-value">
-              {token.pass_through
-                ? <span className="badge badge-amber">Pass Through</span>
-                : <span className="badge badge-blue">Scoped</span>}
-            </span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Created</span>
-            <span className="stat-value stat-value-sm" title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Last Updated</span>
-            <span className="stat-value stat-value-sm" title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Expires</span>
-            <span className="stat-value stat-value-sm">{formatDate(token.expires_at)}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Last used</span>
-            <span className="stat-value stat-value-sm">{formatDate(token.last_used_at)}</span>
-          </div>
-        </div>
+      {showPtModal && (
+        <ConfirmModal
+          title="Enable Pass-Through Mode"
+          body={
+            <div className="amber-block">
+              <p><strong>Pass-through gives this token full unrestricted access</strong> to every entity, service, and system operation in Home Assistant. It is equivalent to a Long-Lived Access Token. The ATM domain blocklist and sensitive attribute scrubbing still apply.</p>
+            </div>
+          }
+          checkLabel="I understand this token will have full Home Assistant access"
+          confirmLabel="Enable Pass-Through"
+          confirmClass="btn-warning"
+          loading={ptToggling}
+          onConfirm={enablePassThrough}
+          onClose={() => setShowPtModal(false)}
+        />
+      )}
 
-        {!token.pass_through && (
-          <div>
-            {!ptConfirmBox ? (
-              <button
-                className="btn btn-text btn-sm btn-text-warning"
-                onClick={() => setPtConfirmBox(true)}
-              >
-                Enable pass-through mode
-              </button>
-            ) : (
-              <div className="amber-block">
-                <p>
-                  <strong>Enabling pass-through gives this token full unrestricted access.</strong> It is equivalent to a Long-Lived Access Token.
-                </p>
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={ptConfirmed}
-                    onChange={(e) => setPtConfirmed(e.target.checked)}
-                    className="checkbox-warning"
-                  />
-                  <span>I understand this token will have full Home Assistant access</span>
-                </label>
-                <div className="pt-enable-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={enablePassThrough}
-                    disabled={!ptConfirmed || ptToggling}
-                  >
-                    {ptToggling ? "Enabling..." : "Enable Pass-Through"}
-                  </button>
-                  <button className="btn btn-text" onClick={() => { setPtConfirmBox(false); setPtConfirmed(false); }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
+      {/* Sticky top section */}
+      <div className="token-detail-sticky">
+        {error && <ErrorMsg msg={error} />}
+
+        {token.pass_through && (
+          <div className="pass-through-header-banner">
+            <p>
+              <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
+            </p>
           </div>
         )}
-      </div>
 
-      <div className="two-col">
-        <div>
-          <div className="card">
-            <div className="card-header">Capability Flags</div>
-            <CapabilityFlags token={token} onUpdate={setToken} />
+        <div className="two-col">
+          {/* Left: Token info card */}
+          <div className="card token-info-card">
+            <div className="token-card-header">
+              <div className="token-card-name-row">
+                <img src={ATM_ICON} className="token-card-icon" alt="" />
+                <span className="token-card-name">{token.name}</span>
+              </div>
+              <div className="token-card-badges">
+                <span className={`badge ${statusClass}`}>{status}</span>
+                {token.pass_through
+                  ? <span className="badge badge-amber">Pass Through</span>
+                  : <span className="badge badge-blue">Scoped</span>}
+              </div>
+            </div>
+
+            <div className="token-card-body">
+              <div className="token-card-meta">
+                <div className="token-meta-table">
+                  <span className="stat-label">Created</span>
+                  <span title={token.created_at ? new Date(token.created_at).toLocaleString() : undefined}>{formatDate(token.created_at)}</span>
+                  <span className="stat-label">Last Updated</span>
+                  <span title={token.updated_at ? new Date(token.updated_at).toLocaleString() : undefined}>{formatDate(token.updated_at)}</span>
+                  <span className="stat-label">Expires</span>
+                  <span>{formatDate(token.expires_at)}</span>
+                  <span className="stat-label">Last Used</span>
+                  <span>{formatDate(token.last_used_at)}</span>
+                </div>
+              </div>
+
+              <div className="token-card-actions">
+                <button className="btn btn-outline btn-sm token-action-btn" onClick={() => setShowRotateModal(true)}>
+                  Rotate
+                </button>
+                {!token.pass_through && (
+                  <button className="btn btn-warning btn-sm token-action-btn" onClick={() => setShowPtModal(true)}>
+                    Enable Pass-Through
+                  </button>
+                )}
+                <button className="btn btn-danger btn-sm token-action-btn" onClick={() => setShowRevokeModal(true)}>
+                  Revoke
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="card">
-            <div className="card-header">Rate Limiting</div>
-            <RateLimitConfig token={token} onUpdate={setToken} />
-          </div>
-          {!token.pass_through && (
-            <div className="card">
-              <div className="card-header">Effective Permission Emulator</div>
+
+          {/* Right: Permission emulator */}
+          <div className="card epe-card">
+            <div className="card-header">Effective Permission Emulator</div>
+            {token.pass_through ? (
+              <p style={{ fontSize: 13, color: "var(--atm-text-2)", margin: 0 }}>
+                Pass Through tokens have unrestricted access to all non-ATM entities. No simulation needed.
+              </p>
+            ) : (
               <PermissionSimulator
                 tokenId={tokenId}
                 externalEntityId={selectedEntityId || undefined}
+                resolveDepth={selectedDepth}
                 triggerVersion={permissionsVersion}
               />
-            </div>
-          )}
-          {!token.pass_through && (
-            <div className="card">
-              <div className="card-header">Permission Summary</div>
-              <PermissionSummary
-                permissions={token.permissions}
-                entityTree={entityTree}
-                onEntityClick={setSelectedEntityId}
-              />
-            </div>
-          )}
+            )}
+          </div>
         </div>
+      </div>
 
-        <div>
-          {token.pass_through ? (
+      {/* Scrollable body */}
+      <div className="token-detail-body">
+        <div className="two-col">
+          <div>
             <div className="card">
-              <div className="card-header">Permissions Tree</div>
-              <PassThroughNotice token={token} onUpdate={setToken} />
+              <div className="card-header">Capability Flags</div>
+              <CapabilityFlags token={token} onUpdate={setToken} />
             </div>
-          ) : (
             <div className="card">
-              <div className="card-header">
-                <span>Permissions Tree</span>
-                <div className="tree-header-actions">
-                  {entityTree && (
-                    <button className="btn btn-text btn-sm" onClick={() => setShowAreaPicker(true)}>
-                      Select by Area
-                    </button>
-                  )}
-                  <button
-                    className="btn btn-text btn-sm btn-text-danger"
-                    onClick={() => setShowClearPerms(true)}
-                  >
-                    Clear All
-                  </button>
-                </div>
+              <div className="card-header">Rate Limiting</div>
+              <RateLimitConfig token={token} onUpdate={setToken} />
+            </div>
+            {!token.pass_through && (
+              <div className="card">
+                <div className="card-header">Permission Summary</div>
+                <PermissionSummary
+                  permissions={token.permissions}
+                  entityTree={entityTree}
+                  onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
+                />
               </div>
-              <EntityTree
-                tokenId={tokenId}
-                permissions={token.permissions}
-                onPermissionsChange={(tree) => {
-                  setToken({ ...token, permissions: tree });
-                  setPermissionsVersion((v) => v + 1);
-                }}
-                onEntityClick={setSelectedEntityId}
-                collapseKey={collapseTreeKey}
-              />
-            </div>
-          )}
+            )}
+          </div>
+
+          <div>
+            {token.pass_through ? (
+              <div className="card">
+                <div className="card-header">Permissions Tree</div>
+                <PassThroughNotice token={token} onUpdate={setToken} />
+              </div>
+            ) : (
+              <div className="card">
+                <div className="card-header">
+                  <span>Permissions Tree</span>
+                  <div className="tree-header-actions">
+                    {entityTree && (
+                      <button className="btn btn-outline btn-sm" onClick={() => setShowAreaPicker(true)}>
+                        Select by Area
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => setShowClearPerms(true)}
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+                <EntityTree
+                  tokenId={tokenId}
+                  permissions={token.permissions}
+                  onPermissionsChange={(tree) => {
+                    setToken({ ...token, permissions: tree });
+                    setPermissionsVersion((v) => v + 1);
+                  }}
+                  onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
+                  collapseKey={collapseTreeKey}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -424,11 +448,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
               This will reset every domain, device, and entity permission to [N] (no explicit grant). The token will have no access to any entities until new permissions are assigned.
             </p>
             <div className="modal-actions">
-              <button
-                className="btn btn-danger"
-                onClick={clearPermissions}
-                disabled={clearingPerms}
-              >
+              <button className="btn btn-danger" onClick={clearPermissions} disabled={clearingPerms}>
                 {clearingPerms ? "Clearing..." : "Clear All"}
               </button>
               <button className="btn btn-text" onClick={() => setShowClearPerms(false)} disabled={clearingPerms}>

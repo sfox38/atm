@@ -4,7 +4,7 @@ import type { PermissionTree, NodeState, EntityTree } from "../types";
 interface Props {
   permissions: PermissionTree;
   entityTree?: EntityTree | null;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
 }
 
 const STATE_LABEL: Record<NodeState, string> = {
@@ -44,19 +44,27 @@ interface SummaryItem {
 function buildLookups(entityTree: EntityTree | null | undefined): {
   entityNames: Map<string, string>;
   deviceNames: Map<string, string>;
+  domainFirstEntity: Map<string, string>;
+  deviceFirstEntity: Map<string, string>;
 } {
   const entityNames = new Map<string, string>();
   const deviceNames = new Map<string, string>();
-  if (!entityTree) return { entityNames, deviceNames };
-  for (const domain of Object.values(entityTree)) {
+  const domainFirstEntity = new Map<string, string>();
+  const deviceFirstEntity = new Map<string, string>();
+  if (!entityTree) return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
+  for (const [domainKey, domain] of Object.entries(entityTree)) {
     for (const [eid, info] of Object.entries(domain.entity_details)) {
       if (info.friendly_name) entityNames.set(eid, info.friendly_name);
     }
-    for (const [did, info] of Object.entries(domain.devices)) {
-      deviceNames.set(did, info.name);
+    const domFirst = domain.deviceless_entities[0]
+      ?? Object.values(domain.devices)[0]?.entities[0];
+    if (domFirst) domainFirstEntity.set(domainKey, domFirst);
+    for (const [did, device] of Object.entries(domain.devices)) {
+      deviceNames.set(did, device.name);
+      if (device.entities[0]) deviceFirstEntity.set(did, device.entities[0]);
     }
   }
-  return { entityNames, deviceNames };
+  return { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity };
 }
 
 function SortHeader({
@@ -88,7 +96,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const { entityNames, deviceNames } = useMemo(
+  const { entityNames, deviceNames, domainFirstEntity, deviceFirstEntity } = useMemo(
     () => buildLookups(entityTree),
     [entityTree],
   );
@@ -165,8 +173,14 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
       </thead>
       <tbody>
         {sorted.map((item) => {
-          const isClickable = item.type === "entity" && !!onEntityClick;
-          const handleClick = isClickable ? () => onEntityClick!(item.id) : undefined;
+          let targetEntity: string | undefined;
+          let depth: "entity" | "device" | "domain" = "entity";
+          if (item.type === "entity") { targetEntity = item.id; depth = "entity"; }
+          else if (item.type === "domain") { targetEntity = domainFirstEntity.get(item.id); depth = "domain"; }
+          else if (item.type === "device") { targetEntity = deviceFirstEntity.get(item.id); depth = "device"; }
+          const isClickable = !!onEntityClick && !!targetEntity;
+          const handleClick = isClickable ? () => onEntityClick!(targetEntity!, depth) : undefined;
+          const title = isClickable ? `Simulate ${item.type} permissions for ${item.id}` : undefined;
           return (
             <tr key={`${item.type}:${item.id}`} className="perm-summary-tr">
               <td className="perm-summary-td">
@@ -177,14 +191,14 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
               <td
                 className={`perm-summary-td-name${isClickable ? " clickable" : ""}`}
                 onClick={handleClick}
-                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+                title={title}
               >
                 {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
               </td>
               <td
                 className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}
                 onClick={handleClick}
-                title={isClickable ? `Simulate permissions for ${item.id}` : undefined}
+                title={title}
               >
                 {item.id}
               </td>

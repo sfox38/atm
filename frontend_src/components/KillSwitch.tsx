@@ -23,14 +23,14 @@ export function KillSwitch({ settings, onToggle, saving }: Props) {
               : "When enabled, all ATM proxy and MCP endpoints are immediately disabled. The admin panel remains accessible."}
           </small>
         </div>
-        <label className={`toggle-checkbox-label${saving ? " disabled" : ""}`}>
+        <label className={`toggle-switch toggle-switch-danger${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
             checked={active}
             disabled={saving}
             onChange={(e) => onToggle(e.target.checked)}
-            className="toggle-checkbox-error"
           />
+          <span className="toggle-switch-track" />
         </label>
       </div>
     </div>

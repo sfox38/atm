@@ -93,7 +93,7 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
                     </span>
                   ) : (
                     <button
-                      className="btn btn-text btn-sm btn-text-danger"
+                      className="btn btn-danger btn-sm"
                       onClick={() => setConfirmId(t.id)}
                     >
                       Delete permanently

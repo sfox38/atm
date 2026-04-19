@@ -16,7 +16,7 @@ interface Props {
   tokenId: string;
   permissions: PermissionTree;
   onPermissionsChange: (tree: PermissionTree) => void;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
 }
 
@@ -133,7 +133,7 @@ interface EntityRowProps {
   filterText: string;
   isGhost: boolean;
   onPermChange: (tree: PermissionTree) => void;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
 }
 
 function EntityRow({
@@ -157,7 +157,7 @@ function EntityRow({
         hint: entityNode?.hint ?? null,
       });
       onPermChange(tree);
-      onEntityClick?.(entityId);
+      onEntityClick?.(entityId, "entity");
     } catch {
       // ignore
     }
@@ -168,7 +168,7 @@ function EntityRow({
       <span className="tree-spacer" />
       <div
         className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
-        onClick={() => onEntityClick?.(entityId)}
+        onClick={() => onEntityClick?.(entityId, "entity")}
         title={onEntityClick ? `Simulate permissions for ${entityId}` : undefined}
       >
         <div className="tree-friendly">{friendlyName ?? entityId}</div>
@@ -203,7 +203,7 @@ interface DeviceGroupProps {
   filterText: string;
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
 }
 
@@ -231,7 +231,7 @@ function DeviceGroup({
     try {
       const tree = await api.patchDevicePermission(tokenId, deviceId, { state: newState });
       onPermChange(tree);
-      if (entityIds[0]) onEntityClick?.(entityIds[0]);
+      if (entityIds[0]) onEntityClick?.(entityIds[0], "device");
     } catch {
       // ignore
     }
@@ -298,7 +298,7 @@ interface DomainGroupProps {
   filterText: string;
   allEntityIds: Set<string>;
   onPermChange: (tree: PermissionTree) => void;
-  onEntityClick?: (entityId: string) => void;
+  onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
 }
 
@@ -328,7 +328,7 @@ function DomainGroup({
       onPermChange(tree);
       const firstEntity = domainData.deviceless_entities[0]
         ?? Object.values(domainData.devices)[0]?.entities[0];
-      if (firstEntity) onEntityClick?.(firstEntity);
+      if (firstEntity) onEntityClick?.(firstEntity, "domain");
     } catch {
       // ignore
     }
