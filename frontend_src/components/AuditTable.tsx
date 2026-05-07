@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { AuditEntry, Outcome } from "../types";
+import { Modal } from "./Modal";
 
 interface Props {
   entries: AuditEntry[];
@@ -64,28 +65,26 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
     ? (() => { try { return JSON.stringify(JSON.parse(entry.payload), null, 2); } catch { return entry.payload; } })()
     : null;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title audit-section-title">Audit Entry</h3>
-        <DetailRow label="Time" value={formatTs(entry.timestamp)} />
-        <DetailRow label="Token" value={formatTokenName(entry.token_name)} />
-        <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
-        <DetailRow label="Method" value={entry.method} mono />
-        <DetailRow label="Resource" value={entry.resource} mono />
-        <DetailRow label="Outcome" value={OUTCOME_LABEL[entry.outcome] ?? entry.outcome} />
-        <DetailRow label="IP" value={entry.client_ip} mono />
-        <DetailRow label="Request ID" value={entry.request_id} mono />
-        {prettyPayload && (
-          <div className="audit-payload-section">
-            <span className="detail-label">Payload</span>
-            <pre className="audit-payload-pre">{prettyPayload}</pre>
-          </div>
-        )}
-        <div className="modal-actions">
-          <button className="btn btn-text" onClick={onClose}>Close</button>
+    <Modal titleId="audit-detail-title" onClose={onClose}>
+      <h3 className="modal-title audit-section-title" id="audit-detail-title">Audit Entry</h3>
+      <DetailRow label="Time" value={formatTs(entry.timestamp)} />
+      <DetailRow label="Token" value={formatTokenName(entry.token_name)} />
+      <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
+      <DetailRow label="Method" value={entry.method} mono />
+      <DetailRow label="Resource" value={entry.resource} mono />
+      <DetailRow label="Outcome" value={OUTCOME_LABEL[entry.outcome] ?? entry.outcome} />
+      <DetailRow label="IP" value={entry.client_ip} mono />
+      <DetailRow label="Request ID" value={entry.request_id} mono />
+      {prettyPayload && (
+        <div className="audit-payload-section">
+          <span className="detail-label">Payload</span>
+          <pre className="audit-payload-pre">{prettyPayload}</pre>
         </div>
+      )}
+      <div className="modal-actions">
+        <button className="btn btn-text" onClick={onClose}>Close</button>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -26,7 +26,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_VALID_NODE_STATES = frozenset({"GREY", "YELLOW", "GREEN", "RED"})
+VALID_NODE_STATES = frozenset({"GREY", "YELLOW", "GREEN", "RED"})
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -52,7 +52,7 @@ class PermissionNode:
     @classmethod
     def from_dict(cls, data: dict) -> PermissionNode:
         state = data.get("state", "GREY")
-        if state not in _VALID_NODE_STATES:
+        if state not in VALID_NODE_STATES:
             raise ValueError(f"Invalid permission node state: {state!r}")
         return cls(state=state, hint=data.get("hint"))
 

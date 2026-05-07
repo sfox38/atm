@@ -19,8 +19,8 @@ from homeassistant.util.dt import parse_datetime, utcnow
 from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, GITHUB_URL, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
-from .policy_engine import Permission, filter_entities_for_token, get_effective_hint, resolve
-from .token_store import PermissionTree, PermissionNode, _VALID_NODE_STATES, token_name_slug
+from .policy_engine import Permission, get_effective_hint, resolve
+from .token_store import PermissionTree, VALID_NODE_STATES, token_name_slug
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,11 +136,11 @@ def _validate_permission_tree_body(body: dict, rid: str) -> web.Response | None:
                     rid,
                 )
             state = value.get("state", "GREY")
-            if state not in _VALID_NODE_STATES:
+            if state not in VALID_NODE_STATES:
                 return _err(
                     "invalid_request",
                     f"Invalid state {state!r} for {node_type[:-1]} {key!r}. "
-                    f"Valid states: {sorted(_VALID_NODE_STATES)}.",
+                    f"Valid states: {sorted(VALID_NODE_STATES)}.",
                     400,
                     rid,
                 )
@@ -676,8 +676,8 @@ async def _patch_permission_node(
         return body
 
     state = body.get("state")
-    if state not in _VALID_NODE_STATES:
-        return _err("invalid_request", f"state must be one of: {', '.join(sorted(_VALID_NODE_STATES))}.", 400, rid)
+    if state not in VALID_NODE_STATES:
+        return _err("invalid_request", f"state must be one of: {', '.join(sorted(VALID_NODE_STATES))}.", 400, rid)
 
     hint = body.get("hint")
     if hint is not None and not isinstance(hint, str):
@@ -1060,22 +1060,18 @@ class ATMAdminWipeView(HomeAssistantView):
         data: ATMData = hass.data[DOMAIN]
         user = request[KEY_HASS_USER]
 
-        for token_id in list(data.sse_connections.keys()):
-            await terminate_token_connections(token_id, data.sse_connections)
-
-        data.rate_limiter.destroy_all()
-        data.rate_limit_notified.clear()
-        # token_counters is cleared here, before acquiring async_lock, to minimise the
-        # lock hold time. The race (a concurrent request incrementing a counter between
-        # this clear and the storage wipe) is accepted: wipe is destructive and should
-        # not be run concurrently with active token use. The counter orphan disappears
-        # on the next request for the wiped token, which will fail authentication.
-        data.token_counters.clear()
-        await data.audit.async_wipe()
-
-        for _tid in list(data.expiry_timers):
-            cancel_expiry_timer(data, _tid)
         async with data.store.async_lock:
+            for token_id in list(data.sse_connections.keys()):
+                await terminate_token_connections(token_id, data.sse_connections)
+
+            data.rate_limiter.destroy_all()
+            data.rate_limit_notified.clear()
+            data.token_counters.clear()
+            await data.audit.async_wipe()
+
+            for _tid in list(data.expiry_timers):
+                cancel_expiry_timer(data, _tid)
+
             active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
             await data.store.async_wipe()
 

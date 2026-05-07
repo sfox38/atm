@@ -34,6 +34,7 @@ class ATMData:
     entity_tree_cache: dict | None = None
     entity_tree_cache_valid: bool = False
     entity_tree_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    sse_connect_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Keyed by token name slug; values are the list of ATMTokenSensor instances.
     platform_entities: dict[str, list] = field(default_factory=dict)
     # Keyed by token ID for fast sensor lookup during counter updates.
@@ -52,3 +53,6 @@ class ATMData:
     async_register_routes: Callable | None = None
     # Incremented on each wipe so ghost SSE sessions can detect they outlived a wipe.
     wipe_epoch: int = 0
+    # Set to True by async_unload_entry. Views check this before accessing store/audit
+    # to avoid KeyError 500s after unload (HA does not expose a view unregister API).
+    shutting_down: bool = False

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import type { TokenRecord, CreateTokenBody } from "../types";
 import { api } from "../api";
 import { copyToClipboard } from "../utils";
+import { Modal } from "./Modal";
 
 const NAME_REGEX = /^[A-Za-z0-9_\-]{3,32}$/;
 
@@ -53,26 +54,24 @@ function TokenDisplayModal({ rawToken, tokenName, onClose }: TokenDisplayProps) 
   }, []);
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3 className="modal-title">Token Created: {tokenName}</h3>
-        <div className="amber-block">
-          <p><strong>This token will not be shown again.</strong> Copy it now before closing.</p>
-        </div>
-        <div className="token-display">{rawToken}</div>
-        <div className="modal-actions">
-          <CopyButton text={rawToken} />
-          <button
-            className="btn btn-text"
-            onClick={onClose}
-            disabled={!closeEnabled}
-            title={closeEnabled ? undefined : "Wait 3 seconds before closing"}
-          >
-            {closeEnabled ? "Close" : "Close (3s)"}
-          </button>
-        </div>
+    <Modal titleId="created-token-title" onClose={closeEnabled ? onClose : undefined}>
+      <h3 className="modal-title" id="created-token-title">Token Created: {tokenName}</h3>
+      <div className="amber-block">
+        <p><strong>This token will not be shown again.</strong> Copy it now before closing.</p>
       </div>
-    </div>
+      <div className="token-display">{rawToken}</div>
+      <div className="modal-actions">
+        <CopyButton text={rawToken} />
+        <button
+          className="btn btn-text"
+          onClick={onClose}
+          disabled={!closeEnabled}
+          title={closeEnabled ? undefined : "Wait 3 seconds before closing"}
+        >
+          {closeEnabled ? "Close" : "Close (3s)"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -152,13 +151,13 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
   }
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3 className="modal-title">Create Token</h3>
+    <Modal titleId="create-token-title" onClose={saving ? undefined : onClose}>
+      <h3 className="modal-title" id="create-token-title">Create Token</h3>
 
-        <div className="field">
-          <label>Name (required)</label>
+      <div className="field">
+        <label htmlFor="token-name-input">Name (required)</label>
           <input
+            id="token-name-input"
             className={`input${nameError ? " error" : ""}`}
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -257,13 +256,12 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
 
         {error && <div className="banner banner-error mt-12">{error}</div>}
 
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
-            {saving ? "Creating..." : "Create"}
-          </button>
-          <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>
-        </div>
+      <div className="modal-actions">
+        <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
+          {saving ? "Creating..." : "Create"}
+        </button>
+        <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>
       </div>
-    </div>
+    </Modal>
   );
 }

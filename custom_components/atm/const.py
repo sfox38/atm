@@ -3,7 +3,7 @@
 import datetime
 import re
 
-ATM_VERSION = "1.0.0"
+ATM_VERSION = "1.1.0"
 MIN_HA_VERSION = "2024.5.0"
 GITHUB_URL = "https://github.com/sfox38/atm"
 DOMAIN = "atm"

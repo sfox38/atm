@@ -1,6 +1,6 @@
 # Advanced Token Management (ATM)
 
-Why give your AI agent basically unrestricted access to your home? ATM is a drop-in replacement for Home Assistant's native MCP server. Security focused, ATM implements all 20 native HA MCP tools so your existing AI client setup works without changes. 
+Why give your AI agent basically unrestricted access to your home? ATM is a drop-in replacement for Home Assistant's native MCP server. Security focused, ATM implements all 20 native HA MCP tools so your existing AI client setup works without changes.
 
 The big difference is control and security: each client gets its own token scoped to exactly the entities you allow, with its own rate limit and optional expiry. Every request is logged. If a token is ever compromised, one click revokes it and terminates all open connections immediately.
 
@@ -8,7 +8,7 @@ ATM runs entirely inside Home Assistant. No extra process, no cloud dependency, 
 
 ---
 
-## Why ATM instead of a LLAT
+## Why ATM instead of an LLAT
 
 | | LLAT + native MCP | ATM token |
 |---|---|---|
@@ -39,7 +39,7 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 - [Using Third-Party MCP Servers](#using-third-party-mcp-servers)
 
 **Reference**
-- [The Permissions Panel](#the-permissions-panel) 
+- [The Permissions Panel](#the-permissions-panel)
 - [The Permission System](#the-permission-system)
 - [Capability Flags](#capability-flags)
 - [Pass-Through Mode](#pass-through-mode)
@@ -56,6 +56,7 @@ If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI
 ## Requirements
 
 - Home Assistant 2024.5 or later
+
 ---
 
 ## Installation
@@ -274,24 +275,6 @@ Call any HA service. Requires appropriate permission for the target entities.
 - Restart and stop services require `allow_restart` flag.
 
 **Returns:** Service response data (if the service declares a response schema). Some services return nothing.
-
----
-
-#### `intent_action`
-Call a named intent with area, device, or floor targeting. Resolves intent parameters through the Permissions Tree and only includes accessible entities.
-
-**Parameters:**
-- `name` (string, required) - Intent name (e.g., `TurnOn`, `SetTemperature`)
-- `area` (string, optional) - Area name
-- `floor` (string, optional) - Floor name
-- `domain` (array, optional) - Domain(s) to limit matching entities
-- `device_class` (array, optional) - Device class(es) to limit matching entities
-
-**Behavior:**
-- Area and floor matching is case-insensitive.
-- After resolving intent targets, ATM filters the result to only entities with WRITE permission.
-- If no accessible entities match the intent, returns "No accessible entities matched."
-- Returned response follows the native HA MCP action tool format.
 
 ---
 
@@ -565,11 +548,9 @@ Send an announcement through Assist satellite devices. Requires `allow_broadcast
 
 ---
 
-
-
 ## Using Third-Party MCP Servers
 
-Third-party MCP servers such as ha-mcp run as standalone processes and make calls directly to HA's native REST API (`/api/`). HA's authentication middleware only accepts Long-Lived Access Tokens - it has no knowledge of ATM tokens. As a result, ATM tokens cannot be used as a drop-in replacement for a LLAT with these servers.
+Third-party MCP servers such as ha-mcp run as standalone processes and make calls directly to HA's native REST API (`/api/`). HA's authentication middleware only accepts Long-Lived Access Tokens - it has no knowledge of ATM tokens. As a result, ATM tokens cannot be used as a drop-in replacement for an LLAT with these servers.
 
 If you need scoped, audited, revocable access for an AI client, point it at ATM's own MCP endpoint (`/api/atm/mcp`) instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your Permissions Tree on every call. For clients that specifically require a third-party server's extended tool set with no access restrictions, use a LLAT directly.
 
@@ -577,7 +558,7 @@ If you need scoped, audited, revocable access for an AI client, point it at ATM'
 
 ## The Permissions Panel
 
-When you open a token in the ATM panel, the token detail page shows the **Permissions Tree** tree on the right side of the screen. Domains sit at the top level, devices nest underneath, and individual entities live at the leaves. You expand a domain to see its devices, expand a device to see its entities.
+When you open a token in the ATM panel, the token detail page shows the **Permissions Tree** on the right side of the screen. Domains sit at the top level, devices nest underneath, and individual entities live at the leaves. You expand a domain to see its devices, expand a device to see its entities.
 
 ### The Permissions Tree
 
@@ -590,7 +571,7 @@ Each row in the tree has four colored buttons. Click one to set the permission s
 
 You do not have to set every node individually. The typical pattern is to set a whole domain or device to 🟡 YELLOW or 🟢 GREEN and leave everything below it at ⬜ GREY - child nodes will inherit the parent's color automatically. Then use 🔴 RED on specific devices or entities to carve out exceptions.
 
-After granting permission to an entity, you can add an optional hint. Hints are surfaced to LLMs via the context endpoint to help them understand what an entity represents - e.g., "This lamp is on Rachels's desk, not the ceiling light".
+After granting permission to an entity, you can add an optional hint. Hints are surfaced to LLMs via the context endpoint to help them understand what an entity represents - e.g., "This lamp is on Rachel's desk, not the ceiling light".
 
 ### Select by Area
 
@@ -598,7 +579,7 @@ The **Select by Area** button at the top of the Permissions Tree card lets you b
 
 ### The Effective Permission Emulator
 
-The **Effective Permission  Emulator** shows you what ATM will actually decide for any entity. Type an entity ID (or click one in the tree or Permission Summary) and ATM runs the full two-pass resolver and shows you the result: WRITE, READ, or no access, which node in the ancestor chain determined the outcome, and the hint text if one is set.
+The **Effective Permission Emulator** shows you what ATM will actually decide for any entity. Type an entity ID (or click one in the tree or Permission Summary) and ATM runs the full two-pass resolver and shows you the result: WRITE, READ, or no access, which node in the ancestor chain determined the outcome, and the hint text if one is set.
 
 This is the fastest way to verify your tree is doing what you intended. If the result surprises you, the path output tells you exactly which ancestor is overriding it.
 
@@ -616,7 +597,7 @@ If the table is empty, no explicit grants have been set and the token has no acc
 Set the `light` domain to 🟡 YELLOW. Set `light.living_room` to 🟢 GREEN. Every light is readable; only the living room light is writable.
 
 **Full access except the guest bedroom:**
-Set your a domain to 🟢 GREEN. Set a guest bedroom device to 🔴 RED. Every entity on that device becomes completely inaccessible, regardless of the domain setting.
+Set a domain to 🟢 GREEN. Set a guest bedroom device to 🔴 RED. Every entity on that device becomes completely inaccessible, regardless of the domain setting.
 
 **Block one noisy sensor inside an otherwise permitted device:**
 Set the device to 🟢 GREEN. Set just that sensor entity to 🔴 RED.
@@ -788,22 +769,22 @@ If `notify_on_rate_limit` is enabled in global settings, HA creates a persistent
 
 ATM removes four sensitive attributes from every state response, regardless of token type or permission level:
 
-1.  **`entity_picture`**  - URLs to entity images/icons, often containing authentication tokens or private asset paths
-2.  **`stream_url`**  - Direct stream URLs (e.g., from cameras), which may contain credentials or expose internal network topology
-3.  **`access_token`**  - Authentication tokens embedded in entity state (e.g., from integrations that store temporary credentials)
-4.  **`still_image_url`**  - Static image URLs that might contain sensitive identifiers or auth parameters
+1. **`entity_picture`** - URLs to entity images and icons, often containing authentication tokens or private asset paths
+2. **`stream_url`** - Direct stream URLs (e.g., from cameras), which may contain credentials or expose internal network topology
+3. **`access_token`** - Authentication tokens embedded in entity state (e.g., from integrations that store temporary credentials)
+4. **`still_image_url`** - Static image URLs that might contain sensitive identifiers or auth parameters
 
 **Why all tokens, all the time:**
 
--   Even pass-through tokens (which bypass entity permissions) still get these attributes scrubbed. A pass-through token that can call any service doesn't need access to embedded credentials—it already has the power to act.
--   Even high-permission scoped tokens with WRITE access get these attributes scrubbed. Permission grants control what  _actions_  a token can take, not what  _secrets_  it can read.
--   This prevents accidental credential leakage through state snapshots, audit logs, or third-party integrations that consume ATM responses.
+- Even pass-through tokens (which bypass entity permissions) still get these attributes scrubbed. A pass-through token that can call any service doesn't need access to embedded credentials; it already has the power to act.
+- Even high-permission scoped tokens with WRITE access get these attributes scrubbed. Permission grants control what _actions_ a token can take, not what _secrets_ it can read.
+- This prevents accidental credential leakage through state snapshots, audit logs, or third-party integrations that consume ATM responses.
 
 **Where stripping happens:**
 
--   Proxy view:  `/api/atm/states`,  `/api/atm/entities/{entity_id}`,  `/api/atm/history`, etc.
--   MCP tools:  `GetLiveContext`,  `GetEntityHistory`,  `GetEntityState`, etc.
--   Service response data filtering: If a service returns entity state in its response (e.g., a script fetching entity details), those attributes are redacted before returning to the caller.
+- Proxy view: `/api/atm/states`, `/api/atm/entities/{entity_id}`, `/api/atm/history`, etc.
+- MCP tools: `GetLiveContext`, `get_history`, `get_state`, etc.
+- Service response data filtering: if a service returns entity state in its response (e.g., a script fetching entity details), those attributes are redacted before returning to the caller.
 
 
 ### Token lifecycle
@@ -840,7 +821,7 @@ ATM creates six HA sensor entities for each active token. For a token named `cla
 | `sensor.atm_claude_code_status` | `active`, `expired`, or `revoked` |
 | `sensor.atm_claude_code_request_count` | Total requests made with this token |
 | `sensor.atm_claude_code_denied_count` | Requests blocked by permission rules |
-| `sensor.atm_claude_code_rate_limit_hits` | Times this token was last rate limited |
+| `sensor.atm_claude_code_rate_limit_hits` | Number of times this token has been rate limited |
 | `sensor.atm_claude_code_last_access` | Timestamp of the most recent request |
 | `sensor.atm_claude_code_expires_in` | Days until expiry, or `No expiry` if no expiry is set |
 

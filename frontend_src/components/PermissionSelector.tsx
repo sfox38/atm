@@ -21,7 +21,7 @@ if (typeof document !== "undefined") {
   document.addEventListener("pointercancel", () => { _dragState = null; });
 }
 
-export function PermissionSelector({ value, onChange, disabled }: Props) {
+export const PermissionSelector = React.memo(function PermissionSelector({ value, onChange, disabled }: Props) {
   return (
     <div
       className="perm-selector"
@@ -52,4 +52,4 @@ export function PermissionSelector({ value, onChange, disabled }: Props) {
       ))}
     </div>
   );
-}
+});
