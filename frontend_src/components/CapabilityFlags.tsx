@@ -1,6 +1,7 @@
 import React from "react";
 import type { TokenRecord, PatchTokenBody } from "../types";
 import { api } from "../api";
+import { Modal } from "./Modal";
 
 interface Props {
   token: TokenRecord;
@@ -133,33 +134,31 @@ export function CapabilityFlags({ token, onUpdate }: Props) {
       {error && <div className="banner banner-error mb-8">{error}</div>}
 
       {pendingFlag && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3 className="modal-title">Enable {pendingFlag.label}?</h3>
-            <div className="amber-block">
-              <p><strong>This is an elevated-trust capability.</strong> {pendingFlag.confirmWarning}</p>
-            </div>
-            <label className="checkbox-row mt-12">
-              <input
-                type="checkbox"
-                checked={ackChecked}
-                onChange={(e) => setAckChecked(e.target.checked)}
-                className="checkbox-warning"
-              />
-              <span>{pendingFlag.confirmAck}</span>
-            </label>
-            <div className="modal-actions">
-              <button
-                className="btn btn-primary btn-warning"
-                onClick={handleConfirm}
-                disabled={!ackChecked || saving === pendingKey}
-              >
-                {saving === pendingKey ? "Enabling..." : "Enable"}
-              </button>
-              <button className="btn btn-text" onClick={handleCancel}>Cancel</button>
-            </div>
+        <Modal titleId="capability-confirm-title" onClose={handleCancel}>
+          <h3 className="modal-title" id="capability-confirm-title">Enable {pendingFlag.label}?</h3>
+          <div className="amber-block">
+            <p><strong>This is an elevated-trust capability.</strong> {pendingFlag.confirmWarning}</p>
           </div>
-        </div>
+          <label className="checkbox-row mt-12">
+            <input
+              type="checkbox"
+              checked={ackChecked}
+              onChange={(e) => setAckChecked(e.target.checked)}
+              className="checkbox-warning"
+            />
+            <span>{pendingFlag.confirmAck}</span>
+          </label>
+          <div className="modal-actions">
+            <button
+              className="btn btn-primary btn-warning"
+              onClick={handleConfirm}
+              disabled={!ackChecked || saving === pendingKey}
+            >
+              {saving === pendingKey ? "Enabling..." : "Enable"}
+            </button>
+            <button className="btn btn-text" onClick={handleCancel}>Cancel</button>
+          </div>
+        </Modal>
       )}
 
       {FLAGS.map((flag) => {

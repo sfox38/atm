@@ -7,7 +7,7 @@ interface Props {
   onUpdate: (updated: TokenRecord) => void;
 }
 
-export function PassThroughNotice({ token, onUpdate }: Props) {
+export const PassThroughNotice = React.memo(function PassThroughNotice({ token, onUpdate }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,4 +71,4 @@ export function PassThroughNotice({ token, onUpdate }: Props) {
       )}
     </div>
   );
-}
+});

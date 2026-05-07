@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
@@ -169,7 +169,7 @@ class AuditLog:
         if outcome is not None:
             entries = [e for e in entries if e.outcome == outcome]
         if client_ip is not None:
-            entries = [e for e in entries if e.client_ip == client_ip]
+            entries = [e for e in entries if client_ip in e.client_ip]
 
         entries.reverse()
         return entries[offset:offset + limit]
@@ -209,11 +209,21 @@ class AuditLog:
         raw = await self._store.async_load()
         if not raw:
             return
+        raw_version = raw.get("version")
+        if raw_version != AUDIT_STORAGE_VERSION:
+            _LOGGER.warning(
+                "Audit storage version mismatch (got %s, expected %s); discarding on-disk log",
+                raw_version, AUDIT_STORAGE_VERSION,
+            )
+            return
         for r in raw.get("entries", []):
             try:
                 ts = parse_datetime(r["timestamp"])
                 if ts is None:
                     raise ValueError(f"unparseable timestamp: {r['timestamp']!r}")
+                outcome = r["outcome"]
+                if outcome not in self._VALID_OUTCOMES:
+                    raise ValueError(f"unrecognised outcome: {outcome!r}")
                 self._log.append(AuditEntry(
                     request_id=r["request_id"],
                     timestamp=ts,
@@ -221,7 +231,7 @@ class AuditLog:
                     token_name=r["token_name"],
                     method=r["method"],
                     resource=r["resource"],
-                    outcome=r["outcome"],
+                    outcome=outcome,
                     client_ip=r["client_ip"],
                     pass_through=r.get("pass_through", False),
                     payload=r.get("payload"),

@@ -1,7 +1,7 @@
 {
   "domain": "atm",
   "name": "Advanced Token Management (ATM)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "config_flow": true,
   "documentation": "https://github.com/sfox38/atm",
   "issue_tracker": "https://github.com/sfox38/atm/issues",
@@ -9,5 +9,5 @@
   "iot_class": "calculated",
   "dependencies": ["frontend"],
   "requirements": [],
-  "homeassistant": "2024.5.0"
+  "min_ha_version": "2024.5.0"
 }

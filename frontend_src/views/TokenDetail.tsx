@@ -4,6 +4,7 @@ import ATM_ICON from "../../custom_components/atm/brand/icon.png";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
 import { formatDateTime, tokenStatus, copyToClipboard } from "../utils";
+import { Modal } from "../components/Modal";
 import { CapabilityFlags } from "../components/CapabilityFlags";
 import { RateLimitConfig } from "../components/RateLimitConfig";
 import { PassThroughNotice } from "../components/PassThroughNotice";
@@ -32,30 +33,29 @@ interface ConfirmModalProps {
 
 function ConfirmModal({ title, body, checkLabel, confirmLabel, confirmClass, loading, onConfirm, onClose }: ConfirmModalProps) {
   const [checked, setChecked] = useState(false);
+  const titleId = `confirm-modal-${title.replace(/\s+/g, "-").toLowerCase()}`;
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3 className="modal-title">{title}</h3>
-        {body}
-        <div className="toggle-row mt-12" style={{ borderTop: "1px solid var(--atm-border)", paddingTop: 12 }}>
-          <div className="toggle-label"><span>{checkLabel}</span></div>
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => setChecked(e.target.checked)}
-            />
-            <span className="toggle-switch-track" />
-          </label>
-        </div>
-        <div className="modal-actions">
-          <button className={`btn ${confirmClass}`} onClick={onConfirm} disabled={!checked || loading}>
-            {loading ? "Please wait..." : confirmLabel}
-          </button>
-          <button className="btn btn-text" onClick={onClose} disabled={loading}>Cancel</button>
-        </div>
+    <Modal titleId={titleId} onClose={loading ? undefined : onClose}>
+      <h3 className="modal-title" id={titleId}>{title}</h3>
+      {body}
+      <div className="toggle-row mt-12" style={{ borderTop: "1px solid var(--atm-border)", paddingTop: 12 }}>
+        <div className="toggle-label"><span>{checkLabel}</span></div>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => setChecked(e.target.checked)}
+          />
+          <span className="toggle-switch-track" />
+        </label>
       </div>
-    </div>
+      <div className="modal-actions">
+        <button className={`btn ${confirmClass}`} onClick={onConfirm} disabled={!checked || loading}>
+          {loading ? "Please wait..." : confirmLabel}
+        </button>
+        <button className="btn btn-text" onClick={onClose} disabled={loading}>Cancel</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -76,26 +76,24 @@ function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string;
   }
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3 className="modal-title">Token Rotated: {tokenName}</h3>
-        <div className="amber-block">
-          <p><strong>The old token value is now invalid.</strong> Copy the new token before closing. It will not be shown again.</p>
-        </div>
-        <div className="token-display">{rawToken}</div>
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</button>
-          <button
-            className="btn btn-text"
-            onClick={onClose}
-            disabled={!closeEnabled}
-            title={closeEnabled ? undefined : "Wait 3 seconds before closing"}
-          >
-            {closeEnabled ? "Close" : "Close (3s)"}
-          </button>
-        </div>
+    <Modal titleId="rotated-token-title" onClose={closeEnabled ? onClose : undefined}>
+      <h3 className="modal-title" id="rotated-token-title">Token Rotated: {tokenName}</h3>
+      <div className="amber-block">
+        <p><strong>The old token value is now invalid.</strong> Copy the new token before closing. It will not be shown again.</p>
       </div>
-    </div>
+      <div className="token-display">{rawToken}</div>
+      <div className="modal-actions">
+        <button className="btn btn-primary" onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</button>
+        <button
+          className="btn btn-text"
+          onClick={onClose}
+          disabled={!closeEnabled}
+          title={closeEnabled ? undefined : "Wait 3 seconds before closing"}
+        >
+          {closeEnabled ? "Close" : "Close (3s)"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -416,22 +414,20 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       )}
 
       {showClearPerms && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3 className="modal-title">Clear all permissions?</h3>
-            <p className="clear-perms-body">
-              This will reset every domain, device, and entity permission to [N] (no explicit grant). The token will have no access to any entities until new permissions are assigned.
-            </p>
-            <div className="modal-actions">
-              <button className="btn btn-danger" onClick={clearPermissions} disabled={clearingPerms}>
-                {clearingPerms ? "Clearing..." : "Clear All"}
-              </button>
-              <button className="btn btn-text" onClick={() => setShowClearPerms(false)} disabled={clearingPerms}>
-                Cancel
-              </button>
-            </div>
+        <Modal titleId="clear-perms-title" onClose={clearingPerms ? undefined : () => setShowClearPerms(false)}>
+          <h3 className="modal-title" id="clear-perms-title">Clear all permissions?</h3>
+          <p className="clear-perms-body">
+            This will reset every domain, device, and entity permission to [N] (no explicit grant). The token will have no access to any entities until new permissions are assigned.
+          </p>
+          <div className="modal-actions">
+            <button className="btn btn-danger" onClick={clearPermissions} disabled={clearingPerms}>
+              {clearingPerms ? "Clearing..." : "Clear All"}
+            </button>
+            <button className="btn btn-text" onClick={() => setShowClearPerms(false)} disabled={clearingPerms}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

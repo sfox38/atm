@@ -155,7 +155,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             try:
                 interval = data.store.get_settings().audit_flush_interval
                 if interval == 0:
-                    await asyncio.sleep(300)
+                    # "Never" mode: sleep and re-check in case the setting changes.
+                    await asyncio.sleep(60)
                     continue
                 await asyncio.sleep(interval * 60)
                 await audit.async_save()
@@ -211,6 +212,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Tear down ATM: terminate SSE connections, unload sensor platform, remove panel."""
     data: ATMData = hass.data.get(DOMAIN)
     if data is not None:
+        data.shutting_down = True
         for token_id in list(data.sse_connections.keys()):
             await terminate_token_connections(token_id, data.sse_connections)
         await data.audit.async_save()

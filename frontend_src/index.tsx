@@ -97,25 +97,46 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     if (t === "tokens") refreshTokens();
   }, [refreshTokens]);
 
+  const TABS: Tab[] = ["tokens", "audit", "settings"];
+
+  function handleTabKeyDown(e: React.KeyboardEvent) {
+    const idx = TABS.indexOf(tab);
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const next = e.key === "ArrowRight"
+        ? TABS[(idx + 1) % TABS.length]
+        : TABS[(idx - 1 + TABS.length) % TABS.length];
+      onTabClick(next);
+    }
+  }
+
   return (
     <div className="atm-shell">
+      <h1 className="sr-only">ATM Token Management</h1>
       {narrow && (
-        <div className="atm-header">
+        <header className="atm-header">
           <ha-menu-button ref={menuRef as React.RefObject<HTMLElement>} />
           <span className="atm-header-title">ATM</span>
-        </div>
+        </header>
       )}
 
-      <div className="atm-tabs">
-        {(["tokens", "audit", "settings"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            className={`atm-tab${tab === t ? " active" : ""}`}
-            onClick={() => onTabClick(t)}
-          >
-            {TAB_LABELS[t]}
-          </button>
-        ))}
+      <nav className="atm-tabs" aria-label="ATM sections">
+        <div role="tablist" aria-label="ATM sections" onKeyDown={handleTabKeyDown} style={{ display: "contents" }}>
+          {TABS.map((t) => (
+            <button
+              key={t}
+              role="tab"
+              id={`atm-tab-${t}`}
+              aria-selected={tab === t}
+              aria-controls={`atm-tabpanel-${t}`}
+              tabIndex={tab === t ? 0 : -1}
+              className={`atm-tab${tab === t ? " active" : ""}`}
+              onClick={() => onTabClick(t)}
+            >
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
 
         <div className="atm-tab-spacer" />
 
@@ -124,9 +145,15 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             Create Token
           </button>
         </div>
-      </div>
+      </nav>
 
-      <div className="atm-content">
+      <main
+        className="atm-content"
+        id={`atm-tabpanel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`atm-tab-${tab}`}
+      >
+        <h2 className="sr-only">{TAB_LABELS[tab]}</h2>
         {tab === "tokens" && view.name === "list" && (
           <TokenListView
             tokens={tokens}
@@ -154,7 +181,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             onThemeChange={onThemeChange}
           />
         )}
-      </div>
+      </main>
     </div>
   );
 }

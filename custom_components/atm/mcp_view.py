@@ -54,7 +54,6 @@ from .const import (
 from .data import ATMData
 from .helpers import (
     FilteredStates as _FilteredStates,
-    ScrubbedState as _ScrubbedState,
     archive_expired_token,
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
@@ -513,6 +512,7 @@ _NATIVE_TOOL_DEFS: list[dict] = [
                 "domain": {"type": "array", "items": {"type": "string", "enum": ["fan"]}},
                 "percentage": {"type": "integer", "minimum": 0, "maximum": 100, "description": "The speed percentage of the fan"},
             },
+            "required": ["percentage"],
         },
     },
     {
@@ -526,6 +526,7 @@ _NATIVE_TOOL_DEFS: list[dict] = [
                 "floor": {"type": "string"},
                 "temperature": {"type": "number"},
             },
+            "required": ["temperature"],
         },
     },
     {
@@ -1431,6 +1432,9 @@ def _yaml_scalar(value: Any) -> str:
     s = str(value)
     if not s:
         return "''"
+    if "'" in s:
+        s = s.replace("'", "''")
+        return f"'{s}'"
     if s.lower() in _YAML_RESERVED:
         return f"'{s}'"
     try:
@@ -2508,9 +2512,9 @@ async def _handle_streamable_batch(
     )
 
     responses = []
-    for r in raw_results:
+    for item, r in zip(items, raw_results):
         if isinstance(r, Exception):
-            responses.append(_jsonrpc_error(None, -32603, "Internal error."))
+            responses.append(_jsonrpc_error(_sanitize_jsonrpc_id(item.get("id")), -32603, "Internal error."))
         elif r is not None:
             responses.append(r)
 
@@ -2545,6 +2549,9 @@ class ATMMcpSseView(HomeAssistantView):
         data: ATMData = hass.data[DOMAIN]
         request_id = generate_request_id()
         client_ip = _get_client_ip(request)
+
+        if data.shutting_down:
+            return _error("service_unavailable", "Service unavailable.", 503, request_id)
 
         if data.store.get_settings().kill_switch:
             return _error("service_unavailable", "Service unavailable.", 503, request_id)
@@ -2582,13 +2589,25 @@ class ATMMcpSseView(HomeAssistantView):
         # is 2^256 the practical risk is negligible, but the check is cheap so there is
         # no performance reason to move it earlier. This is a deliberate deviation from
         # the CLAUDE.md rule 19 wording "before full token validation".
-        current_count = len(data.sse_connections.get(token.id, set()))
-        if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
-            _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
-                 outcome="rate_limited", client_ip=client_ip)
-            resp = _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
-            resp.headers["Retry-After"] = "60"
-            return resp
+        #
+        # The lock serialises the count-check-and-add to prevent two concurrent
+        # connections from both passing the limit check (TOCTOU race).
+        async with data.sse_connect_lock:
+            current_count = len(data.sse_connections.get(token.id, set()))
+            if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
+                _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
+                     outcome="rate_limited", client_ip=client_ip)
+                resp = _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
+                resp.headers["Retry-After"] = "60"
+                return resp
+
+            session_id = str(uuid.uuid4())
+            queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
+            data.mcp_sessions[session_id] = (queue, token.id)
+            if token.id not in data.sse_connections:
+                data.sse_connections[token.id] = set()
+            data.sse_connections[token.id].add(queue)
 
         data.store.update_last_used(token.id, utcnow())
 
@@ -2602,14 +2621,6 @@ class ATMMcpSseView(HomeAssistantView):
             return resp
         _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
              outcome="allowed", client_ip=client_ip)
-
-        session_id = str(uuid.uuid4())
-        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-
-        data.mcp_sessions[session_id] = (queue, token.id)
-        if token.id not in data.sse_connections:
-            data.sse_connections[token.id] = set()
-        data.sse_connections[token.id].add(queue)
 
         def _cleanup() -> None:
             data.mcp_sessions.pop(session_id, None)

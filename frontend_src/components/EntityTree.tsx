@@ -160,7 +160,7 @@ function EntityRow({
   }
 
   return (
-    <div className="tree-node" style={{ paddingLeft: `${indent * 20 + 6}px` }}>
+    <div className="tree-node" role="treeitem" aria-label={friendlyName ?? entityId} style={{ paddingLeft: `${indent * 20 + 6}px` }}>
       <span className="tree-spacer" />
       <div
         className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
@@ -245,9 +245,9 @@ function DeviceGroup({
   if (filterText && !hasVisibleChild && !deviceName.toLowerCase().includes(filterText.toLowerCase())) return null;
 
   return (
-    <div>
+    <div role="treeitem" aria-expanded={expanded} aria-label={deviceName}>
       <div className="tree-node tree-device-indent">
-        <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
+        <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
           {expanded ? "v" : ">"}
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
@@ -260,7 +260,7 @@ function DeviceGroup({
         <PermissionSelector value={state} onChange={setDeviceState} />
       </div>
       {expanded && (
-        <div className="tree-children">
+        <div className="tree-children" role="group">
           {entityIds.map((eid) => {
             const detail = domainData.entity_details[eid];
             return (
@@ -345,9 +345,9 @@ function DomainGroup({
   if (filterText && !hasVisible) return null;
 
   return (
-    <div className="tree-domain-group">
+    <div className="tree-domain-group" role="treeitem" aria-expanded={expanded} aria-label={domainKey}>
       <div className="tree-node">
-        <button className="tree-expand" onClick={() => setExpanded((x) => !x)}>
+        <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
           {expanded ? "v" : ">"}
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
@@ -366,7 +366,7 @@ function DomainGroup({
         <PermissionSelector value={state} onChange={setDomainState} />
       </div>
       {expanded && (
-        <div className="tree-children">
+        <div className="tree-children" role="group">
           {Object.entries(domainData.devices).map(([deviceId, device]) => (
             <DeviceGroup
               key={deviceId}
@@ -481,25 +481,28 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
           placeholder="Filter entities..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          aria-label="Filter entities"
         />
-        <button className="reload-btn" onClick={() => loadTree(true)} title="Reload entity tree from HA">
+        <button className="reload-btn" onClick={() => loadTree(true)} title="Reload entity tree from HA" aria-label="Reload entity tree">
           Reload
         </button>
       </div>
-      {domainKeys.map((domain) => (
-        <DomainGroup
-          key={domain}
-          domainKey={domain}
-          domainData={tree[domain]}
-          permissions={permissions}
-          tokenId={tokenId}
-          filterText={filter}
-          allEntityIds={allEntityIds}
-          onPermChange={onPermissionsChange}
-          onEntityClick={onEntityClick}
-          collapseKey={collapseKey}
-        />
-      ))}
+      <div role="tree" aria-label="Entity permissions">
+        {domainKeys.map((domain) => (
+          <DomainGroup
+            key={domain}
+            domainKey={domain}
+            domainData={tree[domain]}
+            permissions={permissions}
+            tokenId={tokenId}
+            filterText={filter}
+            allEntityIds={allEntityIds}
+            onPermChange={onPermissionsChange}
+            onEntityClick={onEntityClick}
+            collapseKey={collapseKey}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
@@ -24,6 +26,8 @@ if TYPE_CHECKING:
     from .data import ATMData
     from .rate_limiter import RateLimitResult
     from .token_store import TokenRecord
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def build_permitted_states(token: TokenRecord, hass: HomeAssistant) -> dict:
@@ -214,7 +218,7 @@ async def read_json_body(request: web.Request, request_id: str) -> dict | web.Re
     return parsed
 
 
-def parse_time_param(value: str) -> Any:
+def parse_time_param(value: str) -> datetime:
     """Parse a relative time string or ISO timestamp. Raises ValueError for unknown formats."""
     try:
         return parse_relative_time(value)
@@ -239,6 +243,9 @@ async def get_authenticated_token(
     Checks for kill switch, query-param token leakage, format pre-validation,
     hash lookup, revocation, expiry, and rate limits in that order.
     """
+    if data.shutting_down:
+        return build_error_response("service_unavailable", "Service unavailable.", 503, request_id)
+
     if data.store.get_settings().kill_switch:
         # Spec §4.1 says kill-switch mode should make ATM "invisible on the network."
         # At startup that is achieved by not registering any routes. At runtime, aiohttp
@@ -359,7 +366,12 @@ async def archive_expired_token(
         "timestamp": now.isoformat(),
     })
     if data.async_on_token_archived:
-        await data.async_on_token_archived(slug)
+        try:
+            await data.async_on_token_archived(slug)
+        except Exception:
+            _LOGGER.warning(
+                "Sensor cleanup failed for expired token %s", token.id, exc_info=True,
+            )
 
 
 async def terminate_token_connections(

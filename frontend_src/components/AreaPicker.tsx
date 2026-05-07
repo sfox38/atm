@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import type { EntityTree, NodeState } from "../types";
 import { api } from "../api";
+import { Modal } from "./Modal";
 
 interface Props {
   tokenId: string;
@@ -72,11 +73,10 @@ export function AreaPicker({ tokenId, entityTree, onDone, onClose }: Props) {
   }
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3 className="modal-title">Select by Area</h3>
+    <Modal titleId="area-picker-title" onClose={applying ? undefined : onClose}>
+      <h3 className="modal-title" id="area-picker-title">Select by Area</h3>
 
-        <div className="banner banner-warn">
+      <div className="banner banner-warn">
           This grants access to the entities currently in the selected area. Entities added to this area in the future will not be automatically included. Use a domain-level grant for dynamic coverage.
         </div>
 
@@ -118,17 +118,16 @@ export function AreaPicker({ tokenId, entityTree, onDone, onClose }: Props) {
         {error && <div className="banner banner-error">{error}</div>}
         {progress && <p className="area-picker-progress">Applying... {progress}</p>}
 
-        <div className="modal-actions">
-          <button
-            className="btn btn-primary"
-            onClick={apply}
-            disabled={applying || !selectedArea || affectedEntities.length === 0}
-          >
-            {applying ? "Applying..." : "Apply"}
-          </button>
-          <button className="btn btn-text" onClick={onClose} disabled={applying}>Cancel</button>
-        </div>
+      <div className="modal-actions">
+        <button
+          className="btn btn-primary"
+          onClick={apply}
+          disabled={applying || !selectedArea || affectedEntities.length === 0}
+        >
+          {applying ? "Applying..." : "Apply"}
+        </button>
+        <button className="btn btn-text" onClick={onClose} disabled={applying}>Cancel</button>
       </div>
-    </div>
+    </Modal>
   );
 }
